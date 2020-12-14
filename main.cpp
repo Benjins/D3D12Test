@@ -61,10 +61,14 @@ const char* PixelShaderCode =
 "	float4 position : SV_POSITION;\n"
 "	float4 color : COLOR;\n"
 "};\n"
+"cbuffer MyBuffer1 : register(b0)\n"
+"{\n"
+"	float4 constant1;\n"
+"};\n"
 "\n"
 "float4 MainPS(PSInput input) : SV_TARGET\n"
 "{\n"
-"	return input.color;\n"
+"	return input.color * constant1;\n"
 "}\n";
 
 D3D12_SHADER_BYTECODE VertexShaderByteCode;
@@ -99,7 +103,7 @@ D3D12_SHADER_BYTECODE CompileShaderCode(const char* ShaderCode, D3DShaderType Sh
 		return ByteCodeObj;
 	}
 	else {
-		LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, ErrorMsg && ErrorMsg->GetBufferPointer() ? ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
+		LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, (ErrorMsg && ErrorMsg->GetBufferPointer()) ? (const char*)ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
 		ASSERT(false && "Fix the damn shaders");
 		return D3D12_SHADER_BYTECODE();
 	}
@@ -191,6 +195,18 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	D3D12_ROOT_SIGNATURE_DESC RootSigDesc = {};
 	RootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+	const int NumRootParams = 1;
+
+	RootSigDesc.NumParameters = NumRootParams;
+	auto* RootParams = new D3D12_ROOT_PARAMETER[NumRootParams];
+	RootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	RootParams[0].Constants.Num32BitValues = 4;
+	RootParams[0].Constants.RegisterSpace = 0;
+	RootParams[0].Constants.ShaderRegister = 0;
+	RootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	RootSigDesc.pParameters = RootParams;
 
 	ID3DBlob* RootSigBlob = nullptr;
 	ID3DBlob* RootSigErrorBlob = nullptr;
@@ -285,9 +301,9 @@ struct Vertex {
 };
 
 const Vertex triangleVerticesData[] = {
-	{ { 0.0f, 0.25f, 0.0f },{ 1.0f, 0.0f, 0.0f, 1.0f } },
-	{ { 0.25f, -0.25f, 0.0f },{ 0.0f, 1.0f, 0.0f, 1.0f } },
-	{ { -0.25f, -0.25f, 0.0f },{ 0.0f, 0.0f, 1.0f, 1.0f } }
+	{ { 0.0f, 0.8f, 0.0f },{ 1.0f, 0.0f, 0.0f, 1.0f } },
+	{ { 0.8f, -0.8f, 0.0f },{ 0.0f, 1.0f, 0.0f, 1.0f } },
+	{ { -0.8f, -0.8f, 0.0f },{ 0.0f, 0.0f, 1.0f, 1.0f } }
 };
 
 void DoRendering(D3D12System* System)
@@ -331,8 +347,9 @@ void DoRendering(D3D12System* System)
 		CommandList->ResourceBarrier(1, &barrier);
 	}
 
-	float colours[4] = {1, 1, 1, 1};
-	colours[1] = (GFrameCounter % 100) * 0.01f;
+	//float colours[4] = {1, 1, 1, 1};
+	float colours[4] = {0.1f, 0.1f, 0.1f, 0.0f};
+	//colours[1] = (GFrameCounter % 100) * 0.01f;
 	CommandList->ClearRenderTargetView(rtvHandle, colours, 0, nullptr);
 
 	if (PSO == nullptr)
@@ -398,6 +415,15 @@ void DoRendering(D3D12System* System)
 	{
 		CommandList->SetPipelineState(PSO);
 		CommandList->SetGraphicsRootSignature(System->RootSignature);
+
+		float ConstantValues[4] = {
+			((GFrameCounter + 500) % 1000) / 1000.0f,
+			((GFrameCounter + 500) %  900) /  900.0f,
+			((GFrameCounter + 500) %  700) /  700.0f,
+			1.0f
+		};
+
+		CommandList->SetGraphicsRoot32BitConstants(0, 4, ConstantValues, 0);
 
 		D3D12_VIEWPORT Viewport = {};
 		Viewport.MinDepth = 0;
