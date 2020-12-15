@@ -66,9 +66,15 @@ const char* PixelShaderCode =
 "	float4 constant1;\n"
 "};\n"
 "\n"
+"cbuffer MyOtherBuffer1 : register(b1)\n"
+"{\n"
+"	float4 otherConstant1;\n"
+"	float4 otherConstant2;\n"
+"};\n"
+"\n"
 "float4 MainPS(PSInput input) : SV_TARGET\n"
 "{\n"
-"	return input.color * constant1;\n"
+"	return input.color * otherConstant1 * otherConstant2 + constant1;\n"
 "}\n";
 
 D3D12_SHADER_BYTECODE VertexShaderByteCode;
@@ -196,15 +202,21 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	D3D12_ROOT_SIGNATURE_DESC RootSigDesc = {};
 	RootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-	const int NumRootParams = 1;
+	const int NumRootParams = 2;
 
 	RootSigDesc.NumParameters = NumRootParams;
 	auto* RootParams = new D3D12_ROOT_PARAMETER[NumRootParams];
+
 	RootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	RootParams[0].Constants.Num32BitValues = 4;
 	RootParams[0].Constants.RegisterSpace = 0;
 	RootParams[0].Constants.ShaderRegister = 0;
 	RootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	RootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	RootParams[1].Descriptor.RegisterSpace = 0;
+	RootParams[1].Descriptor.ShaderRegister = 1;
+	RootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
 	RootSigDesc.pParameters = RootParams;
 
@@ -238,9 +250,11 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	return 0;
 }
 
-
+// TODO: Put these on system somehow
 ID3D12PipelineState* PSO = nullptr;
 ID3D12Resource* TriangleVertData = nullptr;
+
+ID3D12Resource* PSCBuffer = nullptr;
 
 D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc() {
 	D3D12_RASTERIZER_DESC Desc = {};
@@ -375,6 +389,8 @@ void DoRendering(D3D12System* System)
 		PSODesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
 		PSODesc.SampleDesc.Count = 1;
 
+		//ID3D12ShaderReflection
+
 		System->Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
 	}
 
@@ -412,18 +428,61 @@ void DoRendering(D3D12System* System)
 		TriangleVertData->Unmap(0, nullptr);
 	}
 
+	// TODO: Code dup with above, also same about using upload heap
+	if (PSCBuffer == nullptr)
+	{
+		D3D12_HEAP_PROPERTIES HeapProps = {};
+		HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(float) * 4 * 2);
+
+		HRESULT hr = System->Device->CreateCommittedResource(
+			&HeapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&ResourceDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&PSCBuffer));
+
+		ASSERT(SUCCEEDED(hr));
+	}
+
+	{
+		void* cbBegin = nullptr;
+		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+		HRESULT hr = PSCBuffer->Map(0, &readRange, &cbBegin);
+		ASSERT(SUCCEEDED(hr));
+
+		float cbData[8] = {
+			((GFrameCounter + 500) % 1000) / 1000.0f,
+			1.0f,
+			1.0f,
+			1.0f,
+			1.0f,
+			((GFrameCounter + 200) % 1000) / 1000.0f,
+			1.0f,
+			1.0f,
+		};
+
+		memcpy(cbBegin, cbData, sizeof(cbData));
+		PSCBuffer->Unmap(0, nullptr);
+	}
+
 	{
 		CommandList->SetPipelineState(PSO);
 		CommandList->SetGraphicsRootSignature(System->RootSignature);
 
 		float ConstantValues[4] = {
-			((GFrameCounter + 500) % 1000) / 1000.0f,
-			((GFrameCounter + 500) %  900) /  900.0f,
-			((GFrameCounter + 500) %  700) /  700.0f,
-			1.0f
+			0.0f,//((GFrameCounter + 500) % 1000) / 1000.0f,
+			0.0f,//((GFrameCounter + 500) %  900) /  900.0f,
+			0.0f,//((GFrameCounter + 500) %  700) /  700.0f,
+			0.0f,//1.0f
 		};
 
 		CommandList->SetGraphicsRoot32BitConstants(0, 4, ConstantValues, 0);
+		CommandList->SetGraphicsRootConstantBufferView(1, PSCBuffer->GetGPUVirtualAddress());
 
 		D3D12_VIEWPORT Viewport = {};
 		Viewport.MinDepth = 0;
