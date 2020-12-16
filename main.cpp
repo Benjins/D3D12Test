@@ -40,69 +40,131 @@ struct CommandListReclaimer
 		uint64 FenceValueToWaitOn = 0;
 	};
 
-	std::vector<CommandListToReclaim> PendingNextFence;
-	std::vector<CommandListToReclaim> WaitingForFence;
-	std::vector<CommandListToReclaim> NowAvailable;
+	struct CommandAllocatorToReclaim
+	{
+		ID3D12CommandAllocator* CmdAllocator = nullptr;
+		uint64 FenceValueToWaitOn = 0;
+	};
+
+	std::vector<CommandListToReclaim> CmdListPendingNextFence;
+	std::vector<CommandListToReclaim> CmdListWaitingForFence;
+	std::vector<CommandListToReclaim> CmdListNowAvailable;
+
+	std::vector<CommandAllocatorToReclaim> CmdAllocPendingNextFence;
+	std::vector<CommandAllocatorToReclaim> CmdAllocWaitingForFence;
+	std::vector<CommandAllocatorToReclaim> CmdAllocNowAvailable;
 
 	void NowDoneWithCommandList(ID3D12GraphicsCommandList* CmdList)
 	{
 		// TODO: Oh no
 		//CmdList->AddRef();
-		PendingNextFence.push_back({ CmdList, 0 });
+		CmdListPendingNextFence.push_back({ CmdList, 0 });
+	}
+
+	void NowDoneWithCommandAllocator(ID3D12CommandAllocator* CmdList)
+	{
+		// TODO: Oh no
+		//CmdList->AddRef();
+		CmdAllocPendingNextFence.push_back({ CmdList, 0 });
 	}
 
 	void OnFrameFenceSignaled(uint64 SignaledValue)
 	{
-		for (auto Pending : PendingNextFence)
+		for (auto Pending : CmdListPendingNextFence)
 		{
-			WaitingForFence.push_back({ Pending.CmdList, SignaledValue });
+			CmdListWaitingForFence.push_back({ Pending.CmdList, SignaledValue });
 		}
 
-		PendingNextFence.clear();
+		CmdListPendingNextFence.clear();
+
+		for (auto Pending : CmdAllocPendingNextFence)
+		{
+			CmdAllocWaitingForFence.push_back({ Pending.CmdAllocator, SignaledValue });
+		}
+
+		CmdAllocPendingNextFence.clear();
 	}
 
 	void CheckIfFenceFinished(ID3D12Fence* FrameFence)
 	{
 		uint64 CompletedValue = FrameFence->GetCompletedValue();
 
-		for (int32 i = 0; i < WaitingForFence.size(); i++)
+		for (int32 i = 0; i < CmdListWaitingForFence.size(); i++)
 		{
-			if (WaitingForFence[i].FenceValueToWaitOn <= CompletedValue)
+			if (CmdListWaitingForFence[i].FenceValueToWaitOn <= CompletedValue)
 			{
-				NowAvailable.push_back(WaitingForFence[i]);
-				WaitingForFence[i] = WaitingForFence.back();
-				WaitingForFence.pop_back();
+				CmdListNowAvailable.push_back(CmdListWaitingForFence[i]);
+				CmdListWaitingForFence[i] = CmdListWaitingForFence.back();
+				CmdListWaitingForFence.pop_back();
+				i--;
+			}
+		}
+
+		for (int32 i = 0; i < CmdAllocWaitingForFence.size(); i++)
+		{
+			if (CmdAllocWaitingForFence[i].FenceValueToWaitOn <= CompletedValue)
+			{
+				CmdAllocNowAvailable.push_back(CmdAllocWaitingForFence[i]);
+				CmdAllocWaitingForFence[i] = CmdAllocWaitingForFence.back();
+				CmdAllocWaitingForFence.pop_back();
 				i--;
 			}
 		}
 	}
 
-	ID3D12GraphicsCommandList* GetOpenCommandList(struct D3D12System* System);
+	//ID3D12CommandAllocator* CommandAllocator = nullptr;
+	//ASSERT(SUCCEEDED(hr = Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator))));
+
+	ID3D12CommandAllocator* GetOpenCommandAllocator(struct D3D12System* System);
+	ID3D12GraphicsCommandList* GetOpenCommandList(struct D3D12System* System, ID3D12CommandAllocator* CommandAllocator);
 };
 
+
+#define NUM_BACKBUFFERS 3
+
+static_assert(NUM_BACKBUFFERS < sizeof(uint32) * 8, "Uhhh.....why?");
 
 struct D3D12System {
 	HWND Window = nullptr;
 	ID3D12Device* Device = nullptr;
 	ID3D12CommandQueue* DirectCommandQueue = nullptr;
 	IDXGISwapChain1* Swapchain = nullptr;
-	ID3D12CommandAllocator* CommandAllocator = nullptr;
 	ID3D12RootSignature* RootSignature = nullptr;
 
 	CommandListReclaimer CmdListReclaimer;
+
+	ID3D12Resource* BackbufferResources[NUM_BACKBUFFERS] = {};
+	D3D12_CPU_DESCRIPTOR_HANDLE RTVHandles[NUM_BACKBUFFERS] = {};
+	uint32 RTVHandlesCreated = 0;
 
 	ID3D12Fence* FrameFence = nullptr;
 	uint64 FrameFenceValue = 0;
 };
 
-ID3D12GraphicsCommandList* CommandListReclaimer::GetOpenCommandList(D3D12System* System)
+ID3D12CommandAllocator* CommandListReclaimer::GetOpenCommandAllocator(struct D3D12System* System)
 {
-	if (NowAvailable.size() > 0)
+	if (CmdAllocNowAvailable.size() > 0)
 	{
-		auto* CmdList = NowAvailable.back().CmdList;
-		NowAvailable.pop_back();
+		auto* CmdAlloc = CmdAllocNowAvailable.back().CmdAllocator;
+		CmdAllocNowAvailable.pop_back();
 
-		CmdList->Reset(System->CommandAllocator, nullptr);
+		CmdAlloc->Reset();
+		return CmdAlloc;
+	}
+	else
+	{
+		return nullptr;
+	}
+}
+
+ID3D12GraphicsCommandList* CommandListReclaimer::GetOpenCommandList(struct D3D12System* System, ID3D12CommandAllocator* CommandAllocator)
+{
+	if (CmdListNowAvailable.size() > 0)
+	{
+		auto* CmdList = CmdListNowAvailable.back().CmdList;
+		CmdListNowAvailable.pop_back();
+
+		CmdList->Reset(CommandAllocator, nullptr);
 		return CmdList;
 	}
 	else
@@ -263,22 +325,18 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	DXGI_SWAP_CHAIN_DESC1 SwapchainDesc = {};
 	SwapchainDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 	SwapchainDesc.SampleDesc.Count = 1;
-	SwapchainDesc.BufferCount = 3;
+	SwapchainDesc.BufferCount = NUM_BACKBUFFERS;
 	SwapchainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	SwapchainDesc.BufferUsage = DXGI_USAGE_BACK_BUFFER | DXGI_USAGE_RENDER_TARGET_OUTPUT;
 
 	IDXGISwapChain1* SwapChain = nullptr;
 	ASSERT(SUCCEEDED(hr = DXGIFactory->CreateSwapChainForHwnd(CommandQueue, window, &SwapchainDesc, nullptr, nullptr, &SwapChain)));
 
-	ID3D12CommandAllocator* CommandAllocator = nullptr;
-	ASSERT(SUCCEEDED(hr = Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator))));
-
 	D3D12System D3DSystem;
 	D3DSystem.Device = Device;
 	D3DSystem.DirectCommandQueue = CommandQueue;
 	D3DSystem.Swapchain = SwapChain;
 	D3DSystem.Window = window;
-	D3DSystem.CommandAllocator = CommandAllocator;
 
 	D3D12_ROOT_SIGNATURE_DESC RootSigDesc = {};
 	RootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -405,10 +463,18 @@ const Vertex triangleVerticesData[] = {
 
 void DoRendering(D3D12System* System)
 {
-	ID3D12GraphicsCommandList* CommandList = System->CmdListReclaimer.GetOpenCommandList(System);
+	HRESULT hr;
+
+	ID3D12CommandAllocator* CommandAllocator = System->CmdListReclaimer.GetOpenCommandAllocator(System);
+	if (CommandAllocator == nullptr)
+	{
+		ASSERT(SUCCEEDED(hr = System->Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator))));
+	}
+
+	ID3D12GraphicsCommandList* CommandList = System->CmdListReclaimer.GetOpenCommandList(System, CommandAllocator);
 	if (CommandList == nullptr)
 	{
-		ASSERT(SUCCEEDED(System->Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, System->CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
+		ASSERT(SUCCEEDED(System->Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
 	}
 
 	// Fill up command list...
@@ -419,23 +485,35 @@ void DoRendering(D3D12System* System)
 	//System->Swapchain->QueryInterface(&spSwapChain3);
 	// spSwapChain3->GetCurrentBackBufferIndex();
 	// TODO: Get actual to-be-presented index
-	UINT backBufferIndex = GFrameCounter % 3;
+	UINT backBufferIndex = GFrameCounter % NUM_BACKBUFFERS;
 
-	ID3D12Resource* BackbufferResource = nullptr;
-	System->Swapchain->GetBuffer(backBufferIndex, IID_PPV_ARGS(&BackbufferResource));
+	ID3D12Resource* BackbufferResource = System->BackbufferResources[backBufferIndex];
+	if (BackbufferResource == nullptr)
+	{
+		System->Swapchain->GetBuffer(backBufferIndex, IID_PPV_ARGS(&BackbufferResource));
+		System->BackbufferResources[backBufferIndex] = BackbufferResource;
+	}
 
 	D3D12_RENDER_TARGET_VIEW_DESC RTVDesc = {};
 
 	//CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize);
 	
-	ID3D12DescriptorHeap* DescriptorHeap = nullptr;
-	D3D12_DESCRIPTOR_HEAP_DESC DescriptorHeapDesc = {};
-	DescriptorHeapDesc.NumDescriptors = 3;
-	DescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-	System->Device->CreateDescriptorHeap(&DescriptorHeapDesc, IID_PPV_ARGS(&DescriptorHeap));
+	if ((System->RTVHandlesCreated & (1 << backBufferIndex)) == 0)
+	{
+		ID3D12DescriptorHeap* DescriptorHeap = nullptr;
+		D3D12_DESCRIPTOR_HEAP_DESC DescriptorHeapDesc = {};
+		DescriptorHeapDesc.NumDescriptors = NUM_BACKBUFFERS;
+		DescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+		System->Device->CreateDescriptorHeap(&DescriptorHeapDesc, IID_PPV_ARGS(&DescriptorHeap));
 
-	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	System->Device->CreateRenderTargetView(BackbufferResource, nullptr, rtvHandle);
+		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		System->Device->CreateRenderTargetView(BackbufferResource, nullptr, rtvHandle);
+
+		System->RTVHandlesCreated |= (1 << backBufferIndex);
+		System->RTVHandles[backBufferIndex] = rtvHandle;
+	}
+
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = System->RTVHandles[backBufferIndex];
 
 	{
 		D3D12_RESOURCE_BARRIER barrier = {};
@@ -537,6 +615,7 @@ void DoRendering(D3D12System* System)
 	System->CmdListReclaimer.CheckIfFenceFinished(System->FrameFence);
 
 	System->CmdListReclaimer.NowDoneWithCommandList(CommandList);
+	System->CmdListReclaimer.NowDoneWithCommandAllocator(CommandAllocator);
 	System->CmdListReclaimer.OnFrameFenceSignaled(System->FrameFenceValue);
 
 	int SyncInterval = 1;
