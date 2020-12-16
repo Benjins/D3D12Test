@@ -23,6 +23,63 @@
 
 LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam);
 
+#include <stdint.h>
+
+#include <vector>
+
+using uint32 = uint32_t;
+using int32 = int32_t;
+using uint64 = uint64_t;
+using int64 = int64_t;
+
+struct CommandListReclaimer
+{
+	struct CommandListToReclaim
+	{
+		ID3D12GraphicsCommandList* CmdList = nullptr;
+		uint64 FenceValueToWaitOn = 0;
+	};
+
+	std::vector<CommandListToReclaim> PendingNextFence;
+	std::vector<CommandListToReclaim> WaitingForFence;
+	std::vector<CommandListToReclaim> NowAvailable;
+
+	void NowDoneWithCommandList(ID3D12GraphicsCommandList* CmdList)
+	{
+		// TODO: Oh no
+		//CmdList->AddRef();
+		PendingNextFence.push_back({ CmdList, 0 });
+	}
+
+	void OnFrameFenceSignaled(uint64 SignaledValue)
+	{
+		for (auto Pending : PendingNextFence)
+		{
+			WaitingForFence.push_back({ Pending.CmdList, SignaledValue });
+		}
+
+		PendingNextFence.clear();
+	}
+
+	void CheckIfFenceFinished(ID3D12Fence* FrameFence)
+	{
+		uint64 CompletedValue = FrameFence->GetCompletedValue();
+
+		for (int32 i = 0; i < WaitingForFence.size(); i++)
+		{
+			if (WaitingForFence[i].FenceValueToWaitOn <= CompletedValue)
+			{
+				NowAvailable.push_back(WaitingForFence[i]);
+				WaitingForFence[i] = WaitingForFence.back();
+				WaitingForFence.pop_back();
+				i--;
+			}
+		}
+	}
+
+	ID3D12GraphicsCommandList* GetOpenCommandList(struct D3D12System* System);
+};
+
 
 struct D3D12System {
 	HWND Window = nullptr;
@@ -31,7 +88,30 @@ struct D3D12System {
 	IDXGISwapChain1* Swapchain = nullptr;
 	ID3D12CommandAllocator* CommandAllocator = nullptr;
 	ID3D12RootSignature* RootSignature = nullptr;
+
+	CommandListReclaimer CmdListReclaimer;
+
+	ID3D12Fence* FrameFence = nullptr;
+	uint64 FrameFenceValue = 0;
 };
+
+ID3D12GraphicsCommandList* CommandListReclaimer::GetOpenCommandList(D3D12System* System)
+{
+	if (NowAvailable.size() > 0)
+	{
+		auto* CmdList = NowAvailable.back().CmdList;
+		NowAvailable.pop_back();
+
+		CmdList->Reset(System->CommandAllocator, nullptr);
+		return CmdList;
+	}
+	else
+	{
+		return nullptr;
+	}
+}
+
+void InitRendering(D3D12System* System);
 
 void DoRendering(D3D12System* System);
 
@@ -114,6 +194,7 @@ D3D12_SHADER_BYTECODE CompileShaderCode(const char* ShaderCode, D3DShaderType Sh
 		return D3D12_SHADER_BYTECODE();
 	}
 }
+
 
 int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showCommand) {
 
@@ -234,6 +315,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	VertexShaderByteCode = CompileShaderCode(VertexShaderCode, D3DShaderType::Vertex, "vertex.shader", "MainVS");
 	PixelShaderByteCode = CompileShaderCode(PixelShaderCode, D3DShaderType::Pixel, "pixel.shader", "MainPS");
 
+	InitRendering(&D3DSystem);
+
 	bool shouldQuit = false;
 	while (!shouldQuit) {
 		MSG message;
@@ -322,8 +405,11 @@ const Vertex triangleVerticesData[] = {
 
 void DoRendering(D3D12System* System)
 {
-	ID3D12GraphicsCommandList* CommandList = nullptr;
-	ASSERT(SUCCEEDED(System->Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, System->CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
+	ID3D12GraphicsCommandList* CommandList = System->CmdListReclaimer.GetOpenCommandList(System);
+	if (CommandList == nullptr)
+	{
+		ASSERT(SUCCEEDED(System->Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, System->CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
+	}
 
 	// Fill up command list...
 	//CommandList->clea
@@ -365,89 +451,6 @@ void DoRendering(D3D12System* System)
 	float colours[4] = {0.1f, 0.1f, 0.1f, 0.0f};
 	//colours[1] = (GFrameCounter % 100) * 0.01f;
 	CommandList->ClearRenderTargetView(rtvHandle, colours, 0, nullptr);
-
-	if (PSO == nullptr)
-	{
-		D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
-		{
-			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-			{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-		};
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc = {};
-		PSODesc.InputLayout = { inputElementDescs, (sizeof(inputElementDescs)/sizeof(inputElementDescs[0])) };
-		PSODesc.pRootSignature = System->RootSignature;
-		PSODesc.VS = VertexShaderByteCode;
-		PSODesc.PS = PixelShaderByteCode;
-		PSODesc.RasterizerState = GetDefaultRasterizerDesc();
-		PSODesc.BlendState = GetDefaultBlendStateDesc();
-		PSODesc.DepthStencilState.DepthEnable = FALSE;
-		PSODesc.DepthStencilState.StencilEnable = FALSE;
-		PSODesc.SampleMask = UINT_MAX;
-		PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-		PSODesc.NumRenderTargets = 1;
-		PSODesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
-		PSODesc.SampleDesc.Count = 1;
-
-		//ID3D12ShaderReflection
-
-		System->Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
-	}
-
-	if (TriangleVertData == nullptr)
-	{
-		const int vertexBufferSize = sizeof(triangleVerticesData);
-
-		// TODO: Using upload heap for GPU access is not ideal, we can get away with this because it's small, but ideally we'd want to copy it to an upload heap,
-		// copy that to a default heap and use the default heap for GPU-side access
-		D3D12_HEAP_PROPERTIES HeapProps = {};
-		HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-		HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
-
-		HRESULT hr = System->Device->CreateCommittedResource(
-			&HeapProps,
-			D3D12_HEAP_FLAG_NONE,
-			&ResourceDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&TriangleVertData));
-
-		ASSERT(SUCCEEDED(hr));
-
-
-		// Copy the triangle data to the vertex buffer.
-		void* pVertexDataBegin = nullptr;
-		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
-		hr = TriangleVertData->Map(0, &readRange, &pVertexDataBegin);
-		ASSERT(SUCCEEDED(hr));
-
-		memcpy(pVertexDataBegin, triangleVerticesData, sizeof(triangleVerticesData));
-		TriangleVertData->Unmap(0, nullptr);
-	}
-
-	// TODO: Code dup with above, also same about using upload heap
-	if (PSCBuffer == nullptr)
-	{
-		D3D12_HEAP_PROPERTIES HeapProps = {};
-		HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-		HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(float) * 4 * 2);
-
-		HRESULT hr = System->Device->CreateCommittedResource(
-			&HeapProps,
-			D3D12_HEAP_FLAG_NONE,
-			&ResourceDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&PSCBuffer));
-
-		ASSERT(SUCCEEDED(hr));
-	}
 
 	{
 		void* cbBegin = nullptr;
@@ -528,16 +531,113 @@ void DoRendering(D3D12System* System)
 	ID3D12CommandList* CommandLists[] = { CommandList };
 	System->DirectCommandQueue->ExecuteCommandLists(1, CommandLists);
 
+	System->FrameFenceValue++;
+	System->DirectCommandQueue->Signal(System->FrameFence, System->FrameFenceValue);
+
+	System->CmdListReclaimer.CheckIfFenceFinished(System->FrameFence);
+
+	System->CmdListReclaimer.NowDoneWithCommandList(CommandList);
+	System->CmdListReclaimer.OnFrameFenceSignaled(System->FrameFenceValue);
+
 	int SyncInterval = 1;
 	System->Swapchain->Present(SyncInterval, 0);
 
 	//LOG("We did it, swapchain just presented");
 
-	CommandList->Release();
-
 	GFrameCounter++;
 }
 
+
+void InitRendering(D3D12System* System)
+{
+	if (System->FrameFence == nullptr)
+	{
+		ASSERT(SUCCEEDED(System->Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&System->FrameFence))));
+	}
+
+	if (PSO == nullptr)
+	{
+		D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
+		{
+			{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+			{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		};
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc = {};
+		PSODesc.InputLayout = { inputElementDescs, (sizeof(inputElementDescs) / sizeof(inputElementDescs[0])) };
+		PSODesc.pRootSignature = System->RootSignature;
+		PSODesc.VS = VertexShaderByteCode;
+		PSODesc.PS = PixelShaderByteCode;
+		PSODesc.RasterizerState = GetDefaultRasterizerDesc();
+		PSODesc.BlendState = GetDefaultBlendStateDesc();
+		PSODesc.DepthStencilState.DepthEnable = FALSE;
+		PSODesc.DepthStencilState.StencilEnable = FALSE;
+		PSODesc.SampleMask = UINT_MAX;
+		PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		PSODesc.NumRenderTargets = 1;
+		PSODesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
+		PSODesc.SampleDesc.Count = 1;
+
+		//ID3D12ShaderReflection
+
+		System->Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
+	}
+
+	if (TriangleVertData == nullptr)
+	{
+		const int vertexBufferSize = sizeof(triangleVerticesData);
+
+		// TODO: Using upload heap for GPU access is not ideal, we can get away with this because it's small, but ideally we'd want to copy it to an upload heap,
+		// copy that to a default heap and use the default heap for GPU-side access
+		D3D12_HEAP_PROPERTIES HeapProps = {};
+		HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
+
+		HRESULT hr = System->Device->CreateCommittedResource(
+			&HeapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&ResourceDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&TriangleVertData));
+
+		ASSERT(SUCCEEDED(hr));
+
+
+		// Copy the triangle data to the vertex buffer.
+		void* pVertexDataBegin = nullptr;
+		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+		hr = TriangleVertData->Map(0, &readRange, &pVertexDataBegin);
+		ASSERT(SUCCEEDED(hr));
+
+		memcpy(pVertexDataBegin, triangleVerticesData, sizeof(triangleVerticesData));
+		TriangleVertData->Unmap(0, nullptr);
+	}
+
+	// TODO: Code dup with above, also same about using upload heap
+	if (PSCBuffer == nullptr)
+	{
+		D3D12_HEAP_PROPERTIES HeapProps = {};
+		HeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		HeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(float) * 4 * 2);
+
+		HRESULT hr = System->Device->CreateCommittedResource(
+			&HeapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&ResourceDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&PSCBuffer));
+
+		ASSERT(SUCCEEDED(hr));
+	}
+}
 
 LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam) {
 	LRESULT result = 0;
