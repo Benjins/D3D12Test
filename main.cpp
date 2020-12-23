@@ -1,7 +1,12 @@
 
 #include <stdio.h>
 
+#include <stdint.h>
+
+#include <vector>
+
 #include <Windows.h>
+
 
 #include <d3d12.h>
 
@@ -9,28 +14,19 @@
 
 //#include "d3dx12.h"
 
+#include "basics.h"
 
 #include <dxgi1_2.h>
 
 #include "d3d12_ext.h"
 
+#include "fuzz_shader_compiler.h"
+
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
-#define ASSERT(cond) do { if (!(cond)) { char output[1024] = {}; snprintf(output, sizeof(output), "[%s:%d] Assertion failed '%s'\n", __FILE__, __LINE__, #cond); OutputDebugStringA(output); DebugBreak(); } } while(0)
-
-#define LOG(fmt, ...) do { char output[2048] = {}; snprintf(output, sizeof(output), fmt "\n", ## __VA_ARGS__); OutputDebugStringA(output); } while(0)
 
 LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam);
-
-#include <stdint.h>
-
-#include <vector>
-
-using uint32 = uint32_t;
-using int32 = int32_t;
-using uint64 = uint64_t;
-using int64 = int64_t;
 
 struct CommandListReclaimer
 {
@@ -301,6 +297,24 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	ASSERT(ChosenAdapter != nullptr);
 
+
+	ID3D12Device* Device = nullptr;
+	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
+
+	{
+		for (int32 i = 0; i < 10; i++)
+		{
+			ShaderFuzzingState Fuzzer;
+			Fuzzer.D3DDevice = Device;
+
+			SetSeedOnFuzzer(&Fuzzer, i + 10);
+			DoIterationsWithFuzzer(&Fuzzer, 1);
+
+		}
+
+		return 0;
+	}
+
 	WNDCLASSA WindowClass = {};
 	WindowClass.lpfnWndProc = WindowProc;
 	WindowClass.lpszClassName = "D3D12Test";
@@ -312,9 +326,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	OutputDebugStringA("Blllaaah Yooooo.\n");
 
-
-	ID3D12Device* Device = nullptr;
-	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
 
 	ID3D12CommandQueue* CommandQueue = nullptr;
 	
