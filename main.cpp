@@ -133,6 +133,8 @@ struct D3D12System {
 	D3D12_CPU_DESCRIPTOR_HANDLE RTVHandles[NUM_BACKBUFFERS] = {};
 	uint32 RTVHandlesCreated = 0;
 
+	ID3D12DescriptorHeap* TextureSRVHeap = nullptr;
+
 	ID3D12Fence* FrameFence = nullptr;
 	uint64 FrameFenceValue = 0;
 };
@@ -193,6 +195,9 @@ const char* VertexShaderCode =
 "}\n";
 
 
+// Texture2D MyTexture : register(t0);
+// SamplerState MySampler : register(s0);
+
 const char* PixelShaderCode =
 "struct PSInput\n"
 "{\n"
@@ -204,6 +209,9 @@ const char* PixelShaderCode =
 "	float4 constant1;\n"
 "};\n"
 "\n"
+"Texture2D MyTexture : register(t0);\n"
+"SamplerState MySampler : register(s0);\n"
+"\n"
 "cbuffer MyOtherBuffer1 : register(b1)\n"
 "{\n"
 "	float4 otherConstant1;\n"
@@ -212,7 +220,10 @@ const char* PixelShaderCode =
 "\n"
 "float4 MainPS(PSInput input) : SV_TARGET\n"
 "{\n"
-"	return input.color * otherConstant1 * otherConstant2 + constant1;\n"
+//"	return input.color * otherConstant1 * otherConstant2 + constant1;\n"
+"	float4 Col = float4(1.0, 0.3, 0.3, 0.0);\n"
+"	Col.r = MyTexture.SampleLevel(MySampler, float2(0.5, 0.5), 0).r;\n"
+"	return Col;\n"
 "}\n";
 
 D3D12_SHADER_BYTECODE VertexShaderByteCode;
@@ -253,6 +264,8 @@ D3D12_SHADER_BYTECODE CompileShaderCode(const char* ShaderCode, D3DShaderType Sh
 	}
 }
 
+
+static bool shouldQuit = false;
 
 int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showCommand) {
 
@@ -301,19 +314,19 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
 
-	{
-		for (int32 i = 0; i < 10; i++)
-		{
-			ShaderFuzzingState Fuzzer;
-			Fuzzer.D3DDevice = Device;
-
-			SetSeedOnFuzzer(&Fuzzer, i + 10);
-			DoIterationsWithFuzzer(&Fuzzer, 1);
-
-		}
-
-		return 0;
-	}
+	//{
+	//	for (int32 i = 0; i < 10; i++)
+	//	{
+	//		ShaderFuzzingState Fuzzer;
+	//		Fuzzer.D3DDevice = Device;
+	//
+	//		SetSeedOnFuzzer(&Fuzzer, i + 10);
+	//		DoIterationsWithFuzzer(&Fuzzer, 1);
+	//
+	//	}
+	//
+	//	return 0;
+	//}
 
 	WNDCLASSA WindowClass = {};
 	WindowClass.lpfnWndProc = WindowProc;
@@ -352,10 +365,10 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	D3D12_ROOT_SIGNATURE_DESC RootSigDesc = {};
 	RootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-	const int NumRootParams = 2;
+	constexpr const int NumRootParams = 3;
 
 	RootSigDesc.NumParameters = NumRootParams;
-	auto* RootParams = new D3D12_ROOT_PARAMETER[NumRootParams];
+	D3D12_ROOT_PARAMETER RootParams[NumRootParams];
 
 	RootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	RootParams[0].Constants.Num32BitValues = 4;
@@ -368,12 +381,50 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	RootParams[1].Descriptor.ShaderRegister = 1;
 	RootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
+	RootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	RootParams[2].DescriptorTable.NumDescriptorRanges = 1;
+	D3D12_DESCRIPTOR_RANGE pDescriptorRange = {};
+	pDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	pDescriptorRange.BaseShaderRegister = 0;
+	pDescriptorRange.NumDescriptors = 1;
+	pDescriptorRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+	RootParams[2].DescriptorTable.pDescriptorRanges = &pDescriptorRange;
+	RootParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
 	RootSigDesc.pParameters = RootParams;
+
+	RootSigDesc.NumStaticSamplers = 1;
+
+	D3D12_STATIC_SAMPLER_DESC Sampler = {};
+	Sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+	Sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	Sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	Sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	Sampler.MipLODBias = 0;
+	Sampler.MaxAnisotropy = 0;
+	Sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+	Sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+	Sampler.MinLOD = 0.0f;
+	Sampler.MaxLOD = D3D12_FLOAT32_MAX;
+	Sampler.ShaderRegister = 0;
+	Sampler.RegisterSpace = 0;
+	Sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+	RootSigDesc.pStaticSamplers = &Sampler;
 
 	ID3DBlob* RootSigBlob = nullptr;
 	ID3DBlob* RootSigErrorBlob = nullptr;
 
-	D3D12SerializeRootSignature(&RootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &RootSigBlob, &RootSigErrorBlob);
+	hr = D3D12SerializeRootSignature(&RootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &RootSigBlob, &RootSigErrorBlob);
+
+	if (!SUCCEEDED(hr))
+	{
+		const char* ErrStr = (const char*)RootSigErrorBlob->GetBufferPointer();
+		int32 ErrStrLen = RootSigErrorBlob->GetBufferSize();
+		LOG("Root Sig Err: '%.*s'", ErrStrLen, ErrStr);
+	}
+
+	ASSERT(SUCCEEDED(hr));
 
 	ID3D12RootSignature* RootSig = nullptr;
 	Device->CreateRootSignature(0, RootSigBlob->GetBufferPointer(), RootSigBlob->GetBufferSize(), IID_PPV_ARGS(&RootSig));
@@ -386,7 +437,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	InitRendering(&D3DSystem);
 
-	bool shouldQuit = false;
+	
 	while (!shouldQuit) {
 		MSG message;
 		while (PeekMessage(&message, window, 0, 0, PM_REMOVE)) {
@@ -407,6 +458,9 @@ ID3D12PipelineState* PSO = nullptr;
 ID3D12Resource* TriangleVertData = nullptr;
 
 ID3D12Resource* PSCBuffer = nullptr;
+
+ID3D12Resource* TrianglePixelTexture = nullptr;
+ID3D12Resource* TrianglePixelTextureUpload = nullptr;
 
 D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc() {
 	D3D12_RASTERIZER_DESC Desc = {};
@@ -488,14 +542,92 @@ void DoRendering(D3D12System* System)
 		ASSERT(SUCCEEDED(System->Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
 	}
 
-	// Fill up command list...
-	//CommandList->clea
+	// TODO: Miiiii....texture streaming....lmao except not at all streamed
+	if (TrianglePixelTexture == nullptr)
+	{
+		D3D12_HEAP_PROPERTIES HeapProps = {};
+		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
 
-	//IDXGI
-	//IDXGISwapChain3* SwapChain3;
-	//System->Swapchain->QueryInterface(&spSwapChain3);
-	// spSwapChain3->GetCurrentBackBufferIndex();
-	// TODO: Get actual to-be-presented index
+		int32 TextureWidth = 512;
+		int32 TextureHeight = 512;
+
+		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UINT, TextureWidth, TextureHeight);
+		D3D12_RESOURCE_DESC UploadResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(TextureWidth * TextureHeight * 4); // 4bpp
+
+		HRESULT hr = System->Device->CreateCommittedResource(
+			&HeapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&UploadResourceDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&TrianglePixelTextureUpload));
+
+		ASSERT(SUCCEEDED(hr));
+
+		HeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+		hr = System->Device->CreateCommittedResource(
+			&HeapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&ResourceDesc,
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS(&TrianglePixelTexture));
+
+		void* pTexturePixelData = nullptr;
+		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+		hr = TrianglePixelTextureUpload->Map(0, &readRange, &pTexturePixelData);
+		ASSERT(SUCCEEDED(hr));
+
+		// TODO: Ignoring alignment, since we assume the rows are aligned to where they're contiguous (i.e. stride is expected)
+		uint32* PixelDataAs4Byte = (uint32*)pTexturePixelData;
+		for (int32 Idx = 0; Idx < TextureWidth * TextureHeight; Idx++)
+		{
+			int32 X = Idx % TextureWidth;
+			int32 Y = Idx / TextureWidth;
+
+			PixelDataAs4Byte[Idx] = 0xFF0000FF | ((X % 256) << 16) | ((Y % 256) << 8);
+		}
+
+		TrianglePixelTextureUpload->Unmap(0, nullptr);
+
+		//CommandList->CopyResource(TrianglePixelTexture, TrianglePixelTextureUpload);
+		D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};
+		CopyLocSrc.pResource = TrianglePixelTextureUpload;
+		CopyLocSrc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		CopyLocSrc.PlacedFootprint.Offset = 0;
+		CopyLocSrc.PlacedFootprint.Footprint.Width = TextureWidth;
+		CopyLocSrc.PlacedFootprint.Footprint.Height = TextureHeight;
+		CopyLocSrc.PlacedFootprint.Footprint.Depth = 1;
+		CopyLocSrc.PlacedFootprint.Footprint.RowPitch = TextureWidth * 4;
+		CopyLocSrc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UINT;
+
+		CopyLocDst.pResource = TrianglePixelTexture;
+		CopyLocDst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		CopyLocDst.SubresourceIndex = 0;
+
+		CommandList->CopyTextureRegion(&CopyLocDst, 0, 0, 0, &CopyLocSrc, nullptr);
+
+		{
+			D3D12_RESOURCE_BARRIER barrier = {};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Transition.pResource = TrianglePixelTexture;
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			CommandList->ResourceBarrier(1, &barrier);
+		}
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UINT;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+
+		//D3D12 ERROR : ID3D12Device::CreateShaderResourceView : The Dimensions of the View are invalid due to at least one of the following conditions.MostDetailedMip(value = 0) must be between 0 and MipLevels - 1 of the Texture Resource, 9, inclusively.With the current MostDetailedMip, MipLevels(value = 0) must be between 1 and 10, inclusively, or -1 to default to all mips from MostDetailedMip, in order that the View fit on the Texture.[STATE_CREATION ERROR #31: CREATESHADERRESOURCEVIEW_INVALIDDIMENSIONS]
+		System->Device->CreateShaderResourceView(TrianglePixelTexture, &srvDesc, System->TextureSRVHeap->GetCPUDescriptorHandleForHeapStart());
+	}
+	
 	UINT backBufferIndex = GFrameCounter % NUM_BACKBUFFERS;
 
 	ID3D12Resource* BackbufferResource = System->BackbufferResources[backBufferIndex];
@@ -515,6 +647,7 @@ void DoRendering(D3D12System* System)
 		D3D12_DESCRIPTOR_HEAP_DESC DescriptorHeapDesc = {};
 		DescriptorHeapDesc.NumDescriptors = NUM_BACKBUFFERS;
 		DescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+		// Ha ha, could totally pool these fml
 		System->Device->CreateDescriptorHeap(&DescriptorHeapDesc, IID_PPV_ARGS(&DescriptorHeap));
 
 		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
@@ -573,8 +706,16 @@ void DoRendering(D3D12System* System)
 			0.0f,//1.0f
 		};
 
+		ID3D12DescriptorHeap* ppHeaps[] = { System->TextureSRVHeap };
+		CommandList->SetDescriptorHeaps(1, ppHeaps);
+
 		CommandList->SetGraphicsRoot32BitConstants(0, 4, ConstantValues, 0);
 		CommandList->SetGraphicsRootConstantBufferView(1, PSCBuffer->GetGPUVirtualAddress());
+		CommandList->SetGraphicsRootDescriptorTable(2, System->TextureSRVHeap->GetGPUDescriptorHandleForHeapStart());
+
+		// D3D12 ERROR: ID3D12Device::CreateGraphicsPipelineState: Root Signature doesn't match Pixel Shader: 
+		// A Shader is declaring a resource object as a texture using a register mapped to a root descriptor SRV (ShaderRegister=0, RegisterSpace=0).
+		// SRV or UAV root descriptors can only be Raw or Structured buffers.
 
 		D3D12_VIEWPORT Viewport = {};
 		Viewport.MinDepth = 0;
@@ -727,6 +868,17 @@ void InitRendering(D3D12System* System)
 
 		ASSERT(SUCCEEDED(hr));
 	}
+
+	if (System->TextureSRVHeap == nullptr)
+	{
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+		srvHeapDesc.NumDescriptors = 1;
+		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		HRESULT hr = System->Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&System->TextureSRVHeap));
+
+		ASSERT(SUCCEEDED(hr));
+	}
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -734,6 +886,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam)
 
 	switch (msg)
 	{
+	case WM_DESTROY:
+	case WM_QUIT:
+		shouldQuit = true;
 	default: {
 		result = DefWindowProc(window, msg, wparam, lparam);
 	} break;
