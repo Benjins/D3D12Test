@@ -221,8 +221,8 @@ const char* PixelShaderCode =
 "float4 MainPS(PSInput input) : SV_TARGET\n"
 "{\n"
 //"	return input.color * otherConstant1 * otherConstant2 + constant1;\n"
-"	float4 Col = float4(1.0, 0.3, 0.3, 0.0);\n"
-"	Col.r = MyTexture.SampleLevel(MySampler, float2(0.5, 0.5), 0).r;\n"
+"	float4 Col = float4(1.0, 0.1, 0.1, 0.0);\n"
+"	Col = MyTexture.SampleLevel(MySampler, input.color.gb + float2(otherConstant1.x, otherConstant2.y), 0);\n"
 "	return Col;\n"
 "}\n";
 
@@ -548,10 +548,10 @@ void DoRendering(D3D12System* System)
 		D3D12_HEAP_PROPERTIES HeapProps = {};
 		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
 
-		int32 TextureWidth = 512;
-		int32 TextureHeight = 512;
+		const int32 TextureWidth = 512;
+		const int32 TextureHeight = 512;
 
-		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UINT, TextureWidth, TextureHeight);
+		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, TextureWidth, TextureHeight, 1, 1);
 		D3D12_RESOURCE_DESC UploadResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(TextureWidth * TextureHeight * 4); // 4bpp
 
 		HRESULT hr = System->Device->CreateCommittedResource(
@@ -600,7 +600,7 @@ void DoRendering(D3D12System* System)
 		CopyLocSrc.PlacedFootprint.Footprint.Height = TextureHeight;
 		CopyLocSrc.PlacedFootprint.Footprint.Depth = 1;
 		CopyLocSrc.PlacedFootprint.Footprint.RowPitch = TextureWidth * 4;
-		CopyLocSrc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UINT;
+		CopyLocSrc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
 		CopyLocDst.pResource = TrianglePixelTexture;
 		CopyLocDst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
@@ -620,7 +620,7 @@ void DoRendering(D3D12System* System)
 
 		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UINT;
+		srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 		srvDesc.Texture2D.MipLevels = 1;
 
@@ -685,6 +685,7 @@ void DoRendering(D3D12System* System)
 			1.0f,
 			1.0f,
 			1.0f,
+			//------------------
 			1.0f,
 			((GFrameCounter + 200) % 1000) / 1000.0f,
 			1.0f,
