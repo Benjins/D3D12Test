@@ -48,7 +48,7 @@ struct FuzzShaderASTNode
 	enum struct NodeType
 	{
 		BinaryOperator,
-		TextureLoad,
+		TextureAccess,
 		ReadConstant,
 		ReadVariable,
 		Literal,
@@ -80,14 +80,18 @@ struct FuzzShaderBinaryOperator : FuzzShaderASTNode
 
 	static constexpr NodeType StaticType = NodeType::BinaryOperator;
 
-	FuzzShaderASTNode* LHS;
-	FuzzShaderASTNode* RHS;
+	FuzzShaderASTNode* LHS = nullptr;
+	FuzzShaderASTNode* RHS = nullptr;
 	Operator Op;
 };
 
-struct FuzzShaderTextureLoad : FuzzShaderASTNode
+struct FuzzShaderTextureAccess : FuzzShaderASTNode
 {
-	static constexpr NodeType StaticType = NodeType::TextureLoad;
+	static constexpr NodeType StaticType = NodeType::TextureAccess;
+
+	std::string TextureName;
+	std::string SamplerName;
+	FuzzShaderASTNode* UV = nullptr;
 };
 
 struct FuzzShaderAssignment : FuzzShaderASTNode
@@ -95,7 +99,7 @@ struct FuzzShaderAssignment : FuzzShaderASTNode
 	static constexpr NodeType StaticType = NodeType::Assignment;
 
 	std::string VariableName;
-	FuzzShaderASTNode* Value;
+	FuzzShaderASTNode* Value = nullptr;
 };
 
 struct FuzzShaderLiteral : FuzzShaderASTNode
@@ -119,20 +123,54 @@ struct FuzzShaderStatementBlock : FuzzShaderASTNode
 	std::vector<FuzzShaderASTNode*> Statements;
 };
 
-struct FuzzShaderResourceBinding
+//struct FuzzShaderResourceBinding
+//{
+//	enum struct ResourceType
+//	{
+//		// Texture
+//		// Sampler
+//		// ????
+//	};
+//};
+
+struct FuzzShaderRootConstants
 {
-	enum struct ResourceType
-	{
-		// Texture
-		// Sampler
-		// ????
-	};
+	std::string VarName;
+	int32 ConstantCount = 0; // In 4x32-bit constants, e.g. float4
+	int32 SlotIndex = 0;
+};
+
+struct FuzzShaderRootCBV
+{
+	std::string VarName;
+	int32 ConstantCount = 0;
+	int32 SlotIndex = 0;
+};
+
+//struct FuzzShaderRootCBVDescriptorTable
+//{
+//	std::string VarName;
+//	int32 ConstantCount = 0;
+//};
+
+
+struct FuzzShaderTextureBinding
+{
+	std::string SamplerName;
+	std::string ResourceName;
+	int32 SlotIndex = 0;
 };
 
 struct FuzzShaderAST
 {
 	FuzzShaderType Type;
 	// ....
+
+
+	std::vector<FuzzShaderRootConstants> RootConstants;
+	std::vector<FuzzShaderRootCBV> RootCBVs;
+	std::vector<FuzzShaderTextureBinding> BoundTextures;
+
 
 	FuzzShaderASTNode* RootASTNode = nullptr;
 	
@@ -270,6 +308,15 @@ FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzSh
 
 		return BinaryOp;
 	}
+	else if (Decider < 0.5 && OutShaderAST->BoundTextures.size() > 0)
+	{
+		auto* Tex = OutShaderAST->AllocateNode<FuzzShaderTextureAccess>();
+		Tex->TextureName = OutShaderAST->BoundTextures[Fuzzer->GetIntInRange(0, OutShaderAST->BoundTextures.size() - 1)].ResourceName;
+		Tex->SamplerName = OutShaderAST->BoundTextures[Fuzzer->GetIntInRange(0, OutShaderAST->BoundTextures.size() - 1)].SamplerName;
+		Tex->UV = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
+
+		return Tex;
+	}
 	else if (Decider < 0.6 && OutShaderAST->GetNumVariablesInScope() > 0)
 	{
 		// Variable
@@ -295,7 +342,7 @@ FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzSh
 	}
 }
 
-std::string GetRandomShaderVariableName(ShaderFuzzingState* Fuzzer)
+std::string GetRandomShaderVariableName(ShaderFuzzingState* Fuzzer, const char* Prefix)
 {
 	// TODO: We might want to add more bits just to avoid any birthday attacks...I mean it's not cryptography but still would
 	// be a false positive in fuzzing so yanno
@@ -303,7 +350,7 @@ std::string GetRandomShaderVariableName(ShaderFuzzingState* Fuzzer)
 	int a = Fuzzer->GetIntInRange(0, 64 * 1024);
 	int b = Fuzzer->GetIntInRange(0, 64 * 1024);
 	int c = Fuzzer->GetIntInRange(0, 64 * 1024);
-	snprintf(Buffer, sizeof(Buffer), "tempvar_%d_%d_%d", a, b, c);
+	snprintf(Buffer, sizeof(Buffer), "%s_%d_%d_%d", Prefix, a, b, c);
 
 	return Buffer;
 }
@@ -312,7 +359,7 @@ FuzzShaderAssignment* GenerateFuzzingShaderAssignment(ShaderFuzzingState* Fuzzer
 {
 	auto* NewStmt = OutShaderAST->AllocateNode<FuzzShaderAssignment>();
 
-	NewStmt->VariableName = GetRandomShaderVariableName(Fuzzer);
+	NewStmt->VariableName = GetRandomShaderVariableName(Fuzzer, "tempvar");
 	NewStmt->Value = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
 
 	OutShaderAST->VariablesInScope.back().emplace(NewStmt->VariableName, NewStmt);
@@ -320,10 +367,62 @@ FuzzShaderAssignment* GenerateFuzzingShaderAssignment(ShaderFuzzingState* Fuzzer
 	return NewStmt;
 }
 
+void GenerateResourceBindingForShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderAST)
+{
+	int32 NumRootConstants = Fuzzer->GetIntInRange(0, 4);
+	int32 NumRootCBVs = Fuzzer->GetIntInRange(0, 6);
+	int32 NumBoundTextures = Fuzzer->GetIntInRange(0, 4);
+	
+	for (int32 i = 0; i < NumRootConstants; i++)
+	{
+		FuzzShaderRootConstants Constants;
+		Constants.ConstantCount = 1; // TODO:
+		Constants.SlotIndex = i;
+		Constants.VarName = GetRandomShaderVariableName(Fuzzer, "root_inline");
+
+		OutShaderAST->VariablesInScope.back().emplace(Constants.VarName, nullptr);
+
+		OutShaderAST->RootConstants.push_back(Constants);
+	}
+
+	for (int32 i = 0; i < NumRootCBVs; i++)
+	{
+		FuzzShaderRootCBV CBVBind;
+		CBVBind.ConstantCount = Fuzzer->GetIntInRange(1, 6); // TODO:
+		CBVBind.SlotIndex = NumRootConstants + i;
+		CBVBind.VarName = GetRandomShaderVariableName(Fuzzer, "root_cbv");
+
+		for (int32 VarIdx = 0; VarIdx < CBVBind.ConstantCount; VarIdx++)
+		{
+			char FinalName[1024];
+			snprintf(FinalName, sizeof(FinalName), "%s_var%d", CBVBind.VarName.c_str(), VarIdx);
+			OutShaderAST->VariablesInScope.back().emplace(FinalName, nullptr);
+		}
+
+		OutShaderAST->RootCBVs.push_back(CBVBind);
+	}
+
+	for (int32 i = 0; i < NumBoundTextures; i++)
+	{
+		FuzzShaderTextureBinding TextureBinding;
+		TextureBinding.ResourceName = GetRandomShaderVariableName(Fuzzer, "tex");
+		TextureBinding.SamplerName = GetRandomShaderVariableName(Fuzzer, "sampler");
+		TextureBinding.SlotIndex = i;
+
+		OutShaderAST->BoundTextures.push_back(TextureBinding);
+	}
+}
+
 void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderAST)
 {
+	OutShaderAST->VariablesInScope.emplace_back();
+
+	GenerateResourceBindingForShader(Fuzzer, OutShaderAST);
+
 	auto* RootNode = OutShaderAST->AllocateNode<FuzzShaderStatementBlock>();
 	OutShaderAST->RootASTNode = RootNode;
+
+	//----------------------------------------------------------
 
 	OutShaderAST->VariablesInScope.emplace_back();
 
@@ -350,10 +449,14 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 
 	OutShaderAST->VariablesInScope.pop_back();
 
+	//--------------------------------------
+
+	OutShaderAST->VariablesInScope.pop_back();
+
 	assert(OutShaderAST->VariablesInScope.size() == 0);
 }
 
-#define AST_SOURCE_LIMIT (64 * 1024)
+#define AST_SOURCE_LIMIT (16 * 1024)
 
 void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNode* Node, StringStackBuffer<AST_SOURCE_LIMIT>* StrBuf)
 {
@@ -385,6 +488,16 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 		ConvertShaderASTNodeToSourceCode(ShaderAST, Bin->RHS, StrBuf);
 		StrBuf->AppendFormat(")");
 	}
+	else if (Node->Type == FuzzShaderASTNode::NodeType::TextureAccess)
+	{
+		auto* Tex = static_cast<FuzzShaderTextureAccess*>(Node);
+
+		StrBuf->AppendFormat("(%s.Sample(%s, (", Tex->TextureName.c_str(), Tex->SamplerName.c_str());
+		ConvertShaderASTNodeToSourceCode(ShaderAST, Tex->UV, StrBuf);
+		StrBuf->Append(").xy))");
+
+		//MyTexture.Sample(MySampler, UV)
+	}
 	else if (Node->Type == FuzzShaderASTNode::NodeType::ReadVariable)
 	{
 		auto* ReadVar = static_cast<FuzzShaderReadVariable*>(Node);
@@ -415,6 +528,28 @@ void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
 {
 	// TODO: Maybe move this to heap and make it dynamic, idk
 	StringStackBuffer<AST_SOURCE_LIMIT> StrBuf;
+
+	for (const auto& RootConstant : ShaderAST->RootConstants)
+	{
+		StrBuf.AppendFormat("float4 %s : register(b%d)\n", RootConstant.VarName.c_str(), RootConstant.SlotIndex);
+	}
+
+	for (const auto& RootCBV : ShaderAST->RootCBVs)
+	{
+		StrBuf.AppendFormat("cbuffer %s : register(b%d) {\n", RootCBV.VarName.c_str(), RootCBV.SlotIndex);
+		for (int32 VarIdx = 0; VarIdx < RootCBV.ConstantCount; VarIdx++)
+		{
+			StrBuf.AppendFormat("\tfloat4 %s_var%d;\n", RootCBV.VarName.c_str(), VarIdx);
+		}
+		StrBuf.Append("};\n");
+	}
+
+	for (const auto& TextureBind : ShaderAST->BoundTextures)
+	{
+		StrBuf.AppendFormat("Texture2D %s : register(t%d);\n", TextureBind.ResourceName.c_str(), TextureBind.SlotIndex);
+		StrBuf.AppendFormat("SamplerState %s : register(s%d);\n", TextureBind.SamplerName.c_str(), TextureBind.SlotIndex);
+	}
+
 	StrBuf.Append("float4 Main(/*TODO: Vertex attribs*/)\n");
 
 	ConvertShaderASTNodeToSourceCode(ShaderAST, ShaderAST->RootASTNode, &StrBuf);

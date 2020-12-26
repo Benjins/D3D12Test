@@ -314,19 +314,18 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
 
-	//{
-	//	for (int32 i = 0; i < 10; i++)
-	//	{
-	//		ShaderFuzzingState Fuzzer;
-	//		Fuzzer.D3DDevice = Device;
-	//
-	//		SetSeedOnFuzzer(&Fuzzer, i + 10);
-	//		DoIterationsWithFuzzer(&Fuzzer, 1);
-	//
-	//	}
-	//
-	//	return 0;
-	//}
+	{
+		for (int32 i = 0; i < 10; i++)
+		{
+			ShaderFuzzingState Fuzzer;
+			Fuzzer.D3DDevice = Device;
+	
+			SetSeedOnFuzzer(&Fuzzer, i + 10);
+			DoIterationsWithFuzzer(&Fuzzer, 1);
+		}
+	
+		return 0;
+	}
 
 	WNDCLASSA WindowClass = {};
 	WindowClass.lpfnWndProc = WindowProc;
@@ -397,9 +396,9 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	D3D12_STATIC_SAMPLER_DESC Sampler = {};
 	Sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-	Sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	Sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-	Sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+	Sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	Sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	Sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
 	Sampler.MipLODBias = 0;
 	Sampler.MaxAnisotropy = 0;
 	Sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
@@ -521,9 +520,9 @@ struct Vertex {
 };
 
 const Vertex triangleVerticesData[] = {
-	{ { 0.0f, 0.8f, 0.0f },{ 1.0f, 0.0f, 0.0f, 1.0f } },
-	{ { 0.8f, -0.8f, 0.0f },{ 0.0f, 1.0f, 0.0f, 1.0f } },
-	{ { -0.8f, -0.8f, 0.0f },{ 0.0f, 0.0f, 1.0f, 1.0f } }
+	{ { 0.0f, 0.8f, 0.9f },{ 1.0f, 0.0f, 0.0f, 1.0f } },
+	{ { 0.8f, -0.8f, 0.2f },{ 0.0f, 2.0f, 0.0f, 1.0f } },
+	{ { -0.8f, -0.8f, 0.0f },{ 0.0f, 0.0f, 3.0f, 1.0f } }
 };
 
 void DoRendering(D3D12System* System)
