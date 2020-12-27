@@ -14,6 +14,8 @@
 
 #include "fuzz_shader_compiler.h"
 
+#include "shader_meta.h"
+
 #include "string_stack_buffer.h"
 
 #include <assert.h>
@@ -27,13 +29,13 @@
 
 typedef unsigned char byte;
 
-enum struct FuzzShaderType
-{
-	Vertex,
-	Pixel,
-	Compute,
-	Count
-};
+//enum struct D3DShaderType
+//{
+//	Vertex,
+//	Pixel,
+//	Compute,
+//	Count
+//};
 
 struct FuzzShaderASTNode
 {
@@ -100,6 +102,7 @@ struct FuzzShaderAssignment : FuzzShaderASTNode
 
 	std::string VariableName;
 	FuzzShaderASTNode* Value = nullptr;
+	bool IsPredeclared = false; // Really just used in a hack for the end of the vertex shader
 };
 
 struct FuzzShaderLiteral : FuzzShaderASTNode
@@ -161,11 +164,24 @@ struct FuzzShaderTextureBinding
 	int32 SlotIndex = 0;
 };
 
+struct FuzzShaderSemanticVar
+{
+	ShaderSemantic Semantic = ShaderSemantic::POSITION;
+	std::string VarName;
+	int32 ParamIdx = 0;
+};
+
 struct FuzzShaderAST
 {
-	FuzzShaderType Type;
+	D3DShaderType Type;
 	// ....
 
+	// Var names for the vertex stage input from Input Assembler
+	// (must be empty for pixel shader)
+	std::vector<FuzzShaderSemanticVar> IAVars;
+
+	// Var names for Vertex output and Pixel input
+	std::vector<FuzzShaderSemanticVar> InterStageVars;
 
 	std::vector<FuzzShaderRootConstants> RootConstants;
 	std::vector<FuzzShaderRootCBV> RootCBVs;
@@ -419,6 +435,28 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 
 	GenerateResourceBindingForShader(Fuzzer, OutShaderAST);
 
+	if (OutShaderAST->Type == D3DShaderType::Pixel)
+	{
+		for (const auto& Var : OutShaderAST->InterStageVars)
+		{
+			// HACK: Referencing the struct I guess
+			OutShaderAST->VariablesInScope.back().emplace(std::string("input.") + Var.VarName, nullptr);
+		}
+	}
+	else if (OutShaderAST->Type == D3DShaderType::Vertex)
+	{
+		for (const auto& Var : OutShaderAST->IAVars)
+		{
+			// HACK: Referencing the struct I guess
+			OutShaderAST->VariablesInScope.back().emplace(std::string("input.") + Var.VarName, nullptr);
+		}
+	}
+	// TODO: Compute...idk...
+	else
+	{
+		assert(false && "segsdg");
+	}
+
 	auto* RootNode = OutShaderAST->AllocateNode<FuzzShaderStatementBlock>();
 	OutShaderAST->RootASTNode = RootNode;
 
@@ -447,6 +485,29 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 		//RootNode->Statements.push_back();
 	}
 
+	//---
+	// TODO: This will be a pain to explicate from the above, which could be a generic block statement code...
+	{
+		if (OutShaderAST->Type == D3DShaderType::Pixel)
+		{
+			auto* NewStmt = GenerateFuzzingShaderAssignment(Fuzzer, OutShaderAST);
+			NewStmt->IsPredeclared = true;
+			NewStmt->VariableName = "result";
+			RootNode->Statements.push_back(NewStmt);
+		}
+		else if (OutShaderAST->Type == D3DShaderType::Vertex)
+		{
+			for (const auto& Var : OutShaderAST->InterStageVars)
+			{
+				auto* NewStmt = GenerateFuzzingShaderAssignment(Fuzzer, OutShaderAST);
+				NewStmt->IsPredeclared = true;
+				NewStmt->VariableName = std::string("result.") + Var.VarName;
+				RootNode->Statements.push_back(NewStmt);
+			}
+		}
+	}
+	//---
+
 	OutShaderAST->VariablesInScope.pop_back();
 
 	//--------------------------------------
@@ -465,7 +526,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 	{
 		auto* Assnmt = static_cast<FuzzShaderAssignment*>(Node);
 
-		StrBuf->AppendFormat("\tfloat4 %s = ", Assnmt->VariableName.c_str());
+		StrBuf->AppendFormat("\t%s%s = ", (Assnmt->IsPredeclared ? "" : "float4 "), Assnmt->VariableName.c_str());
 		ConvertShaderASTNodeToSourceCode(ShaderAST, Assnmt->Value, StrBuf);
 		StrBuf->AppendFormat(";\n");
 	}
@@ -492,9 +553,10 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 	{
 		auto* Tex = static_cast<FuzzShaderTextureAccess*>(Node);
 
-		StrBuf->AppendFormat("(%s.Sample(%s, (", Tex->TextureName.c_str(), Tex->SamplerName.c_str());
+		// TODO: SampleLevel is required for vertex shader, but Sample() could be done in Pixel shaders
+		StrBuf->AppendFormat("(%s.SampleLevel(%s, (", Tex->TextureName.c_str(), Tex->SamplerName.c_str());
 		ConvertShaderASTNodeToSourceCode(ShaderAST, Tex->UV, StrBuf);
-		StrBuf->Append(").xy))");
+		StrBuf->Append(").xy, 0))");
 
 		//MyTexture.Sample(MySampler, UV)
 	}
@@ -512,10 +574,31 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 	{
 		auto* Block = static_cast<FuzzShaderStatementBlock*>(Node);
 		StrBuf->AppendFormat("{\n");
+
+		// TODO: Should be in AST generation, not here
+		if (Node == ShaderAST->RootASTNode)
+		{
+			if (ShaderAST->Type == D3DShaderType::Vertex)
+			{
+				StrBuf->AppendFormat("\tPSInput result;\n");
+			}
+			else if (ShaderAST->Type == D3DShaderType::Pixel)
+			{
+				StrBuf->AppendFormat("\tfloat4 result;\n");
+			}
+		}
+
 		for (auto Stmt : Block->Statements)
 		{
 			ConvertShaderASTNodeToSourceCode(ShaderAST, Stmt, StrBuf);
 		}
+
+		// TODO: Should be in AST generation, not here
+		if (Node == ShaderAST->RootASTNode)
+		{
+			StrBuf->AppendFormat("\treturn result;\n");
+		}
+
 		StrBuf->AppendFormat("}\n");
 	}
 	else
@@ -531,12 +614,12 @@ void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
 
 	for (const auto& RootConstant : ShaderAST->RootConstants)
 	{
-		StrBuf.AppendFormat("float4 %s : register(b%d)\n", RootConstant.VarName.c_str(), RootConstant.SlotIndex);
+		StrBuf.AppendFormat("float4 %s;\n", RootConstant.VarName.c_str());
 	}
 
 	for (const auto& RootCBV : ShaderAST->RootCBVs)
 	{
-		StrBuf.AppendFormat("cbuffer %s : register(b%d) {\n", RootCBV.VarName.c_str(), RootCBV.SlotIndex);
+		StrBuf.AppendFormat("cbuffer %s {\n", RootCBV.VarName.c_str());
 		for (int32 VarIdx = 0; VarIdx < RootCBV.ConstantCount; VarIdx++)
 		{
 			StrBuf.AppendFormat("\tfloat4 %s_var%d;\n", RootCBV.VarName.c_str(), VarIdx);
@@ -546,11 +629,43 @@ void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
 
 	for (const auto& TextureBind : ShaderAST->BoundTextures)
 	{
-		StrBuf.AppendFormat("Texture2D %s : register(t%d);\n", TextureBind.ResourceName.c_str(), TextureBind.SlotIndex);
-		StrBuf.AppendFormat("SamplerState %s : register(s%d);\n", TextureBind.SamplerName.c_str(), TextureBind.SlotIndex);
+		StrBuf.AppendFormat("Texture2D %s;\n", TextureBind.ResourceName.c_str());
+		StrBuf.AppendFormat("SamplerState %s;\n", TextureBind.SamplerName.c_str());
 	}
 
-	StrBuf.Append("float4 Main(/*TODO: Vertex attribs*/)\n");
+
+	if (ShaderAST->Type == D3DShaderType::Vertex)
+	{
+		StrBuf.Append("struct VSInput {\n");
+		for (const auto& Var : ShaderAST->IAVars)
+		{
+			StrBuf.AppendFormat("float4 %s : %s;\n", Var.VarName.c_str(), GetSemanticNameFromSemantic(Var.Semantic));
+		}
+		StrBuf.Append("};\n");
+	}
+
+	// VS and PS both need to know this
+	{
+		StrBuf.Append("struct PSInput {\n");
+		for (const auto& Var : ShaderAST->InterStageVars)
+		{
+			StrBuf.AppendFormat("float4 %s : %s;\n", Var.VarName.c_str(), GetSemanticNameFromSemantic(Var.Semantic));
+		}
+		StrBuf.Append("};\n");
+	}
+
+	if (ShaderAST->Type == D3DShaderType::Vertex)
+	{
+		StrBuf.Append("PSInput Main(VSInput input)\n");
+	}
+	else if (ShaderAST->Type == D3DShaderType::Pixel)
+	{
+		StrBuf.Append("float4 Main(PSInput input) : SV_TARGET\n");
+	}
+	else
+	{
+		assert(false && "afsdgf");
+	}
 
 	ConvertShaderASTNodeToSourceCode(ShaderAST, ShaderAST->RootASTNode, &StrBuf);
 
@@ -562,7 +677,31 @@ void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
 
 void VerifyShaderCompilation(FuzzShaderAST* ShaderAST)
 {
+	ID3DBlob* ByteCode = nullptr;
+	ID3DBlob* ErrorMsg = nullptr;
+	UINT CompilerFlags = D3DCOMPILE_DEBUG;
+	
+	char ShaderSourceName[256] = {};
+	snprintf(ShaderSourceName, sizeof(ShaderSourceName), "");
 
+	HRESULT hr = D3DCompile(ShaderAST->SourceCode.c_str(), ShaderAST->SourceCode.size(), ShaderSourceName, nullptr, nullptr, "Main", GetTargetForShaderType(ShaderAST->Type), CompilerFlags, 0, &ByteCode, &ErrorMsg);
+	if (SUCCEEDED(hr)) {
+		D3D12_SHADER_BYTECODE ByteCodeObj;
+		ByteCodeObj.pShaderBytecode = ByteCode->GetBufferPointer();
+		ByteCodeObj.BytecodeLength = ByteCode->GetBufferSize();
+
+		// TODO: Grab metadata
+	}
+	else
+	{
+
+		LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, (ErrorMsg && ErrorMsg->GetBufferPointer()) ? (const char*)ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
+
+		LOG("Dumping shader source....");
+		OutputDebugStringA(ShaderAST->SourceCode.c_str());
+
+		ASSERT(false && "Fix the damn shaders");
+	}
 }
 
 void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader)
@@ -575,6 +714,49 @@ void VerifyComputePSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* Comp
 	// TODO: fancy
 }
 
+void CreateInterstageVarsForVertexAndPixelShaders(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader)
+{
+	// Always include Position as IA var
+	{
+		FuzzShaderSemanticVar PosVar;
+		PosVar.ParamIdx = 0;
+		PosVar.Semantic = ShaderSemantic::POSITION;
+		PosVar.VarName = GetRandomShaderVariableName(Fuzzer, "iaparam");
+		VertexShader->IAVars.push_back(PosVar);
+	}
+
+	int32 NumAdditionalIAVars = Fuzzer->GetIntInRange(0, 4);
+	for (int32 i = 0; i < NumAdditionalIAVars; i++)
+	{
+		FuzzShaderSemanticVar NewVar;
+		NewVar.ParamIdx = i + 1;
+		NewVar.Semantic = (ShaderSemantic)Fuzzer->GetIntInRange((int32)ShaderSemantic::IA_FIRST, (int32)ShaderSemantic::IA_LAST);
+		NewVar.VarName = GetRandomShaderVariableName(Fuzzer, "iaparam");
+		VertexShader->IAVars.push_back(NewVar);
+	}
+
+	// Alwyas include SV_Position as inter-stage var
+	{
+		FuzzShaderSemanticVar SVPosVar;
+		SVPosVar.ParamIdx = 0;
+		SVPosVar.Semantic = ShaderSemantic::SV_POSITION;
+		SVPosVar.VarName = GetRandomShaderVariableName(Fuzzer, "param");
+		VertexShader->InterStageVars.push_back(SVPosVar);
+		PixelShader->InterStageVars.push_back(SVPosVar);
+	}
+
+
+	int32 NumAdditionalInterstageVars = Fuzzer->GetIntInRange(0, 4);
+	for (int32 i = 0; i < NumAdditionalInterstageVars; i++)
+	{
+		FuzzShaderSemanticVar NewVar;
+		NewVar.ParamIdx = i + 1;
+		NewVar.Semantic = (ShaderSemantic)Fuzzer->GetIntInRange((int32)ShaderSemantic::INTER_FIRST, (int32)ShaderSemantic::INTER_LAST);
+		NewVar.VarName = GetRandomShaderVariableName(Fuzzer, "param");
+		VertexShader->IAVars.push_back(NewVar);
+	}
+}
+
 void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed)
 {
 	Fuzzer->RNGState.seed(Seed);
@@ -583,15 +765,27 @@ void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed)
 void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 {
 	{
-		FuzzShaderAST VertShader;
-		VertShader.Type = FuzzShaderType::Vertex;
+		FuzzShaderAST VertShader, PixelShader;
+		VertShader.Type = D3DShaderType::Vertex;
+		PixelShader.Type = D3DShaderType::Pixel;
+
+		CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
 
 		// Set types
 		GenerateFuzzingShader(Fuzzer, &VertShader);
+		GenerateFuzzingShader(Fuzzer, &PixelShader);
 
 		ConvertShaderASTToSourceCode(&VertShader);
+		ConvertShaderASTToSourceCode(&PixelShader);
 
-		LOG("Shader source:----------\n%s\n---------", VertShader.SourceCode.c_str());
+		VerifyShaderCompilation(&VertShader);
+		VerifyShaderCompilation(&PixelShader);
+
+		//LOG("==============\nShader source (vertex):----------");
+		//OutputDebugStringA(VertShader.SourceCode.c_str());
+		//LOG("---------\nShader source (pixel):---------");
+		//OutputDebugStringA(PixelShader.SourceCode.c_str());
+		//LOG("================");
 	}
 
 	return;
@@ -599,8 +793,10 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 	for (int32_t Iteration = 0; Iteration < NumIterations; Iteration++)
 	{
 		FuzzShaderAST VertShader, PixelShader;
-		VertShader.Type = FuzzShaderType::Vertex;
-		PixelShader.Type = FuzzShaderType::Pixel;
+		VertShader.Type = D3DShaderType::Vertex;
+		PixelShader.Type = D3DShaderType::Pixel;
+
+		CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
 
 		// Set types
 		GenerateFuzzingShader(Fuzzer, &VertShader);

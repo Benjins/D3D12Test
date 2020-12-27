@@ -178,18 +178,29 @@ void DoRendering(D3D12System* System);
 // Code from https://github.com/microsoft/DirectX-Graphics-Samples/blob/master/Samples/UWP/D3D12HelloWorld/src/HelloTriangle/shaders.hlsl
 // Copyright (c) Microsoft. All rights reserved. MIT Licensed.
 const char* VertexShaderCode =
+"struct VSInput\n"
+"{\n"
+"	float4 position : POSITION;\n"
+"	float4 color : COLOR;\n"
+"};\n"
+
 "struct PSInput\n"
 "{\n"
 "	float4 position : SV_POSITION;\n"
 "	float4 color : COLOR;\n"
 "};\n"
 "\n"
-"PSInput MainVS(float4 position : POSITION, float4 color : COLOR)\n"
+"Texture2D MyTexture;\n"
+"SamplerState MySampler;\n"
+"Texture2D MyOtherTexture;\n"
+"SamplerState MyOtherSampler;\n"
+"\n"
+"PSInput MainVS(VSInput input)\n"
 "{\n"
 "	PSInput result;\n"
 "\n"
-"	result.position = position;\n"
-"	result.color = color;\n"
+"	result.position = input.position;\n"
+"	result.color = input.color + MyTexture.SampleLevel(MySampler,float2(0,0), 0) + MyOtherTexture.SampleLevel(MyOtherSampler,float2(0,0), 0);\n"
 "\n"
 "	return result;\n"
 "}\n";
@@ -222,29 +233,15 @@ const char* PixelShaderCode =
 "{\n"
 //"	return input.color * otherConstant1 * otherConstant2 + constant1;\n"
 "	float4 Col = float4(1.0, 0.1, 0.1, 0.0);\n"
-"	Col = MyTexture.SampleLevel(MySampler, input.color.gb + float2(otherConstant1.x, otherConstant2.y), 0);\n"
+"	Col = MyTexture.SampleLevel(MySampler, input.color.gb + float2(otherConstant1.x + constant1.x, otherConstant2.y), 0);\n"
 "	return Col;\n"
 "}\n";
 
 D3D12_SHADER_BYTECODE VertexShaderByteCode;
 D3D12_SHADER_BYTECODE PixelShaderByteCode;
 
-enum struct D3DShaderType {
-	Vertex,
-	Pixel
-};
 
-const char* GetTargetForShaderType(D3DShaderType Type) {
-	if (Type == D3DShaderType::Vertex) {
-		return "vs_5_0";
-	}
-	else if (Type == D3DShaderType::Pixel) {
-		return "ps_5_0";
-	}
-	else {
-		ASSERT(false && "Bad shader type!!!");
-	}
-}
+#include "shader_meta.h"
 
 D3D12_SHADER_BYTECODE CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, const char* ShaderSourceName, const char* EntryPoint) {
 	ID3DBlob* ByteCode = nullptr;
@@ -255,6 +252,27 @@ D3D12_SHADER_BYTECODE CompileShaderCode(const char* ShaderCode, D3DShaderType Sh
 		D3D12_SHADER_BYTECODE ByteCodeObj;
 		ByteCodeObj.pShaderBytecode = ByteCode->GetBufferPointer();
 		ByteCodeObj.BytecodeLength = ByteCode->GetBufferSize();
+
+		ID3D12ShaderReflection* ShaderReflection = nullptr;
+		hr = D3DReflect(ByteCodeObj.pShaderBytecode, ByteCodeObj.BytecodeLength, IID_PPV_ARGS(&ShaderReflection));
+
+		D3D12_SHADER_DESC ShaderDesc = {};
+		hr = ShaderReflection->GetDesc(&ShaderDesc);
+
+		D3D12_SIGNATURE_PARAMETER_DESC InputParamDescs[MAX_INPUT_PARAM_COUNT] = {};
+
+		for (int32 i = 0; i < ShaderDesc.InputParameters; i++)
+		{
+			hr = ShaderReflection->GetInputParameterDesc(i, &InputParamDescs[i]);
+		}
+
+		D3D12_SHADER_INPUT_BIND_DESC BoundResourceDescs[MAX_BOUND_RESOURCES] = {};
+
+		for (int32 i = 0; i < ShaderDesc.BoundResources; i++)
+		{
+			ShaderReflection->GetResourceBindingDesc(i, &BoundResourceDescs[i]);
+		}
+
 		return ByteCodeObj;
 	}
 	else {
@@ -314,8 +332,9 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
 
+	//if (0)
 	{
-		for (int32 i = 0; i < 10; i++)
+		for (int32 i = 0; i < 10*1000; i++)
 		{
 			ShaderFuzzingState Fuzzer;
 			Fuzzer.D3DDevice = Device;
