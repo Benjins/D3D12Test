@@ -339,8 +339,13 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			ShaderFuzzingState Fuzzer;
 			Fuzzer.D3DDevice = Device;
 	
-			SetSeedOnFuzzer(&Fuzzer, i + 10);
+			SetSeedOnFuzzer(&Fuzzer, i + 10000);
 			DoIterationsWithFuzzer(&Fuzzer, 1);
+
+			if (i % 100 == 0)
+			{
+				LOG("run %d finished", i);
+			}
 		}
 	
 		return 0;

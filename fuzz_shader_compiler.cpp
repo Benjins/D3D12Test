@@ -308,6 +308,40 @@ struct FuzzShaderAST
 
 	std::string SourceCode;
 	D3D12_SHADER_BYTECODE ByteCode;
+
+	~FuzzShaderAST()
+	{
+		for (auto* Node : AllocatedNodes)
+		{
+			if (Node->Type == FuzzShaderASTNode::NodeType::StatementBlock)
+			{
+				auto* StmtBlock = (FuzzShaderStatementBlock*)Node;
+				StmtBlock->~FuzzShaderStatementBlock();
+			}
+			else if (Node->Type == FuzzShaderASTNode::NodeType::ReadVariable)
+			{
+				auto* ReadVar = (FuzzShaderReadVariable*)Node;
+				ReadVar->~FuzzShaderReadVariable();
+			}
+			else if (Node->Type == FuzzShaderASTNode::NodeType::Assignment)
+			{
+				auto* Assnmt = (FuzzShaderAssignment*)Node;
+				Assnmt->~FuzzShaderAssignment();
+			}
+			else if (Node->Type == FuzzShaderASTNode::NodeType::TextureAccess)
+			{
+				auto* Tex = (FuzzShaderTextureAccess*)Node;
+				Tex->~FuzzShaderTextureAccess();
+			}
+		}
+
+		for (const auto& Block : BlockAllocations)
+		{
+			delete Block;
+		}
+
+		BlockAllocations.clear();
+	}
 };
 
 FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderAST)
@@ -691,6 +725,9 @@ void VerifyShaderCompilation(FuzzShaderAST* ShaderAST)
 		ByteCodeObj.BytecodeLength = ByteCode->GetBufferSize();
 
 		// TODO: Grab metadata
+
+		// TODO: Don't do this, we'll need it for later...
+		ByteCode->Release();
 	}
 	else
 	{
