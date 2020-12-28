@@ -168,6 +168,7 @@ struct FuzzShaderSemanticVar
 {
 	ShaderSemantic Semantic = ShaderSemantic::POSITION;
 	std::string VarName;
+	int32 SemanticIdx = 0;
 	int32 ParamIdx = 0;
 };
 
@@ -308,6 +309,8 @@ struct FuzzShaderAST
 
 	std::string SourceCode;
 	D3D12_SHADER_BYTECODE ByteCode;
+	ID3DBlob* ByteCodeBlob = nullptr;
+	ShaderMetadata ShaderMeta;
 
 	~FuzzShaderAST()
 	{
@@ -711,39 +714,295 @@ void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
 
 void VerifyShaderCompilation(FuzzShaderAST* ShaderAST)
 {
-	ID3DBlob* ByteCode = nullptr;
-	ID3DBlob* ErrorMsg = nullptr;
-	UINT CompilerFlags = D3DCOMPILE_DEBUG;
-	
 	char ShaderSourceName[256] = {};
-	snprintf(ShaderSourceName, sizeof(ShaderSourceName), "");
+	snprintf(ShaderSourceName, sizeof(ShaderSourceName), "<SHADER_FUZZ_FILE>");
 
-	HRESULT hr = D3DCompile(ShaderAST->SourceCode.c_str(), ShaderAST->SourceCode.size(), ShaderSourceName, nullptr, nullptr, "Main", GetTargetForShaderType(ShaderAST->Type), CompilerFlags, 0, &ByteCode, &ErrorMsg);
-	if (SUCCEEDED(hr)) {
-		D3D12_SHADER_BYTECODE ByteCodeObj;
-		ByteCodeObj.pShaderBytecode = ByteCode->GetBufferPointer();
-		ByteCodeObj.BytecodeLength = ByteCode->GetBufferSize();
+	ShaderAST->ByteCodeBlob = CompileShaderCode(ShaderAST->SourceCode.c_str(), ShaderAST->Type, ShaderSourceName, "Main", &ShaderAST->ShaderMeta);
 
-		// TODO: Grab metadata
+	//ID3DBlob* ByteCode = nullptr;
+	//ID3DBlob* ErrorMsg = nullptr;
+	//UINT CompilerFlags = D3DCOMPILE_DEBUG;
+	//
+	//char ShaderSourceName[256] = {};
+	//snprintf(ShaderSourceName, sizeof(ShaderSourceName), "");
+	//
+	//HRESULT hr = D3DCompile(ShaderAST->SourceCode.c_str(), ShaderAST->SourceCode.size(), ShaderSourceName, nullptr, nullptr, "Main", GetTargetForShaderType(ShaderAST->Type), CompilerFlags, 0, &ByteCode, &ErrorMsg);
+	//if (SUCCEEDED(hr)) {
+	//	D3D12_SHADER_BYTECODE ByteCodeObj;
+	//	ByteCodeObj.pShaderBytecode = ByteCode->GetBufferPointer();
+	//	ByteCodeObj.BytecodeLength = ByteCode->GetBufferSize();
+	//
+	//	// TODO: Grab metadata
+	//	ID3D12ShaderReflection* ShaderReflection = nullptr;
+	//	hr = D3DReflect(ByteCodeObj.pShaderBytecode, ByteCodeObj.BytecodeLength, IID_PPV_ARGS(&ShaderReflection));
+	//
+	//	//ShaderMetadata
+	//
+	//	ShaderAST->ByteCode = ByteCodeObj;
+	//	ShaderAST->ByteCodeBlob = ByteCode;
+	//}
+	//else
+	//{
+	//	LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, (ErrorMsg && ErrorMsg->GetBufferPointer()) ? (const char*)ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
+	//
+	//	LOG("Dumping shader source....");
+	//	OutputDebugStringA(ShaderAST->SourceCode.c_str());
+	//
+	//	ASSERT(false && "Fix the damn shaders");
+	//}
+}
 
-		// TODO: Don't do this, we'll need it for later...
-		ByteCode->Release();
-	}
-	else
+ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader)
+{
+	D3D12_ROOT_SIGNATURE_DESC RootSigDesc = {};
+	RootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+	std::vector<D3D12_ROOT_PARAMETER> RootParams;
+	std::vector<D3D12_STATIC_SAMPLER_DESC> RootStaticSamplers;
+
+	// TODO
+	std::vector<D3D12_DESCRIPTOR_RANGE> DescriptorRanges;
+
 	{
+		int32 NumVertexSRVs = VertexShader->ShaderMeta.NumSRVs;
+		int32 NumPixelSRVs = PixelShader->ShaderMeta.NumSRVs;
+		int32 NumVertexCBVs = VertexShader->ShaderMeta.NumCBVs;
+		int32 NumPixelCBVs = PixelShader->ShaderMeta.NumCBVs;
 
-		LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, (ErrorMsg && ErrorMsg->GetBufferPointer()) ? (const char*)ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
+		int32 NumSRVs = max(NumPixelSRVs, NumVertexSRVs);
+		int32 NumCBVs = max(NumPixelCBVs, NumVertexCBVs);
 
-		LOG("Dumping shader source....");
-		OutputDebugStringA(ShaderAST->SourceCode.c_str());
+		int32 TotalRootParams = NumSRVs + NumCBVs;
+		RootParams.resize(TotalRootParams);
 
-		ASSERT(false && "Fix the damn shaders");
+		DescriptorRanges.resize(TotalRootParams);
+
+		int32 RootParamIdx = 0;
+		for (int32 SRVIdx = 0; SRVIdx < NumSRVs; SRVIdx++)
+		{
+			RootParams[RootParamIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+			RootParams[RootParamIdx].DescriptorTable.NumDescriptorRanges = 1;
+
+			D3D12_DESCRIPTOR_RANGE& pDescriptorRange = DescriptorRanges[SRVIdx];
+			pDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+			pDescriptorRange.BaseShaderRegister = SRVIdx;
+			pDescriptorRange.NumDescriptors = 1;
+			pDescriptorRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+			RootParams[RootParamIdx].DescriptorTable.pDescriptorRanges = &pDescriptorRange;
+			if (SRVIdx < NumVertexSRVs && SRVIdx < NumPixelSRVs)
+			{
+				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+			}
+			else if (SRVIdx < NumVertexSRVs)
+			{
+				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+			}
+			else if (SRVIdx < NumPixelSRVs)
+			{
+				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+			}
+			else
+			{
+				assert(false && "asjsfauk");
+			}
+
+			RootParamIdx++;
+		}
+
+		for (int32 CBVIdx = 0; CBVIdx < NumCBVs; CBVIdx++)
+		{
+			RootParams[RootParamIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+			RootParams[RootParamIdx].Descriptor.RegisterSpace = 0;
+			RootParams[RootParamIdx].Descriptor.ShaderRegister = CBVIdx;
+			
+			if (CBVIdx < NumVertexCBVs && CBVIdx < NumPixelCBVs)
+			{
+				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+			}
+			else if (CBVIdx < NumVertexCBVs)
+			{
+				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+			}
+			else if (CBVIdx < NumPixelCBVs)
+			{
+				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+			}
+			else
+			{
+				assert(false && "asjsfauk");
+			}
+
+			RootParamIdx++;
+		}
+
+		int32 NumVertexSamplers = VertexShader->ShaderMeta.NumStaticSamplers;
+		int32 NumPixelSamplers = PixelShader->ShaderMeta.NumStaticSamplers;
+		int32 TotalStaticSamplers = max(NumVertexSamplers, NumPixelSamplers);
+		RootStaticSamplers.resize(TotalStaticSamplers);
+
+		for (int32 SamplerIdx = 0; SamplerIdx < TotalStaticSamplers; SamplerIdx++)
+		{
+			RootStaticSamplers[SamplerIdx].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+			RootStaticSamplers[SamplerIdx].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+			RootStaticSamplers[SamplerIdx].AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+			RootStaticSamplers[SamplerIdx].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+			RootStaticSamplers[SamplerIdx].MipLODBias = 0;
+			RootStaticSamplers[SamplerIdx].MaxAnisotropy = 0;
+			RootStaticSamplers[SamplerIdx].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+			RootStaticSamplers[SamplerIdx].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+			RootStaticSamplers[SamplerIdx].MinLOD = 0.0f;
+			RootStaticSamplers[SamplerIdx].MaxLOD = D3D12_FLOAT32_MAX;
+			RootStaticSamplers[SamplerIdx].ShaderRegister = SamplerIdx;
+			RootStaticSamplers[SamplerIdx].RegisterSpace = 0;
+
+			if (SamplerIdx < NumVertexSamplers && SamplerIdx < NumPixelSamplers)
+			{
+				RootStaticSamplers[SamplerIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+			}
+			else if (SamplerIdx < NumVertexSamplers)
+			{
+				RootStaticSamplers[SamplerIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+			}
+			else if (SamplerIdx < NumPixelSamplers)
+			{
+				RootStaticSamplers[SamplerIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+			}
+			else
+			{
+				assert(false && "asjsfauk");
+			}
+		}
+	}
+
+	RootSigDesc.NumParameters = RootParams.size();
+	RootSigDesc.pParameters = RootParams.data();
+
+	RootSigDesc.NumStaticSamplers = RootStaticSamplers.size();
+	RootSigDesc.pStaticSamplers = RootStaticSamplers.data();
+
+	ID3DBlob* RootSigBlob = nullptr;
+	ID3DBlob* RootSigErrorBlob = nullptr;
+
+	HRESULT hr = D3D12SerializeRootSignature(&RootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &RootSigBlob, &RootSigErrorBlob);
+
+	if (!SUCCEEDED(hr))
+	{
+		const char* ErrStr = (const char*)RootSigErrorBlob->GetBufferPointer();
+		int32 ErrStrLen = RootSigErrorBlob->GetBufferSize();
+		LOG("Root Sig Err: '%.*s'", ErrStrLen, ErrStr);
+	}
+
+	ASSERT(SUCCEEDED(hr));
+
+	ID3D12RootSignature* RootSig = nullptr;
+	hr = Fuzzer->D3DDevice->CreateRootSignature(0, RootSigBlob->GetBufferPointer(), RootSigBlob->GetBufferSize(), IID_PPV_ARGS(&RootSig));
+
+	ASSERT(SUCCEEDED(hr));
+
+	return RootSig;
+}
+
+// TODO: Random, taking FuzzerState
+static D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc() {
+	D3D12_RASTERIZER_DESC Desc = {};
+	Desc.FillMode = D3D12_FILL_MODE_SOLID;
+	Desc.CullMode = D3D12_CULL_MODE_BACK;
+	Desc.FrontCounterClockwise = FALSE;
+	Desc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
+	Desc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+	Desc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+	Desc.DepthClipEnable = TRUE;
+	Desc.MultisampleEnable = FALSE;
+	Desc.AntialiasedLineEnable = FALSE;
+	Desc.ForcedSampleCount = 0;
+	Desc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+
+	return Desc;
+}
+
+// TODO: Random, taking FuzzerState
+static D3D12_BLEND_DESC GetDefaultBlendStateDesc() {
+	D3D12_BLEND_DESC Desc = {};
+	Desc.AlphaToCoverageEnable = FALSE;
+	Desc.IndependentBlendEnable = FALSE;
+
+	const D3D12_RENDER_TARGET_BLEND_DESC DefaultRenderTargetBlendDesc =
+	{
+		FALSE,FALSE,
+		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+		D3D12_LOGIC_OP_NOOP,
+		D3D12_COLOR_WRITE_ENABLE_ALL,
+	};
+
+	for (int i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+		Desc.RenderTarget[i] = DefaultRenderTargetBlendDesc;
+	}
+
+	return Desc;
+}
+
+void FillOutPSOInputElements(std::vector<D3D12_INPUT_ELEMENT_DESC>* OutInputElementDescs, FuzzShaderAST* VertexShader)
+{
+	OutInputElementDescs->empty();
+	OutInputElementDescs->reserve(VertexShader->IAVars.size());
+
+	for (const auto& Var : VertexShader->IAVars)
+	{
+		D3D12_INPUT_ELEMENT_DESC InputElement = {};
+		InputElement.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+		// TODO: Assumes every param is 16 bytes, which...fair assumption given above
+		InputElement.AlignedByteOffset = Var.ParamIdx * 16;
+		InputElement.InputSlot = Var.ParamIdx;
+		InputElement.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+		InputElement.SemanticName = GetSemanticNameFromSemantic(Var.Semantic);
+		InputElement.SemanticIndex = Var.SemanticIdx;
+
+		OutInputElementDescs->push_back(InputElement);
 	}
 }
 
 void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader)
 {
+	// Determine root signature
+	ID3D12RootSignature* RootSig = CreateGraphicsRootSignatureFromVertexShaderMeta(Fuzzer, VertexShader, PixelShader);
 
+	// Create PSO description
+	std::vector<D3D12_INPUT_ELEMENT_DESC> InputElementDescs;
+	//{
+	//	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+	//	{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	//};
+
+	FillOutPSOInputElements(&InputElementDescs, VertexShader);
+
+	D3D12_SHADER_BYTECODE VertexShaderByteCode;
+	VertexShaderByteCode.pShaderBytecode = VertexShader->ByteCodeBlob->GetBufferPointer();
+	VertexShaderByteCode.BytecodeLength = VertexShader->ByteCodeBlob->GetBufferSize();
+
+	D3D12_SHADER_BYTECODE PixelShaderByteCode;
+	PixelShaderByteCode.pShaderBytecode = PixelShader->ByteCodeBlob->GetBufferPointer();
+	PixelShaderByteCode.BytecodeLength = PixelShader->ByteCodeBlob->GetBufferSize();
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc = {};
+	PSODesc.InputLayout = { InputElementDescs.data(), (UINT)InputElementDescs.size() };
+	PSODesc.pRootSignature = RootSig;
+	PSODesc.VS = VertexShaderByteCode;
+	PSODesc.PS = PixelShaderByteCode;
+	PSODesc.RasterizerState = GetDefaultRasterizerDesc();
+	PSODesc.BlendState = GetDefaultBlendStateDesc();
+	PSODesc.DepthStencilState.DepthEnable = FALSE;
+	PSODesc.DepthStencilState.StencilEnable = FALSE;
+	PSODesc.SampleMask = UINT_MAX;
+	PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	PSODesc.NumRenderTargets = 1;
+	PSODesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
+	PSODesc.SampleDesc.Count = 1;
+
+	// Compile PSO
+	ID3D12PipelineState* PSO = nullptr;
+	Fuzzer->D3DDevice->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
 }
 
 void VerifyComputePSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* ComputeShader)
@@ -753,12 +1012,15 @@ void VerifyComputePSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* Comp
 
 void CreateInterstageVarsForVertexAndPixelShaders(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader)
 {
+	int32 SemanticVarCounts[(int32)ShaderSemantic::Count] = {};
+
 	// Always include Position as IA var
 	{
 		FuzzShaderSemanticVar PosVar;
 		PosVar.ParamIdx = 0;
 		PosVar.Semantic = ShaderSemantic::POSITION;
 		PosVar.VarName = GetRandomShaderVariableName(Fuzzer, "iaparam");
+		SemanticVarCounts[(int32)PosVar.Semantic]++;
 		VertexShader->IAVars.push_back(PosVar);
 	}
 
@@ -768,8 +1030,19 @@ void CreateInterstageVarsForVertexAndPixelShaders(ShaderFuzzingState* Fuzzer, Fu
 		FuzzShaderSemanticVar NewVar;
 		NewVar.ParamIdx = i + 1;
 		NewVar.Semantic = (ShaderSemantic)Fuzzer->GetIntInRange((int32)ShaderSemantic::IA_FIRST, (int32)ShaderSemantic::IA_LAST);
-		NewVar.VarName = GetRandomShaderVariableName(Fuzzer, "iaparam");
-		VertexShader->IAVars.push_back(NewVar);
+		// Cannot duplicate semantics in Input assembler vars
+		if (SemanticVarCounts[(int32)NewVar.Semantic] == 0)
+		{
+			NewVar.VarName = GetRandomShaderVariableName(Fuzzer, "iaparam");
+			SemanticVarCounts[(int32)NewVar.Semantic]++;
+
+			VertexShader->IAVars.push_back(NewVar);
+		}
+	}
+
+	for (int32 i = 0; i < (int32)ShaderSemantic::Count; i++)
+	{
+		SemanticVarCounts[i] = 0;
 	}
 
 	// Alwyas include SV_Position as inter-stage var
@@ -778,6 +1051,7 @@ void CreateInterstageVarsForVertexAndPixelShaders(ShaderFuzzingState* Fuzzer, Fu
 		SVPosVar.ParamIdx = 0;
 		SVPosVar.Semantic = ShaderSemantic::SV_POSITION;
 		SVPosVar.VarName = GetRandomShaderVariableName(Fuzzer, "param");
+		SemanticVarCounts[(int32)SVPosVar.Semantic]++;
 		VertexShader->InterStageVars.push_back(SVPosVar);
 		PixelShader->InterStageVars.push_back(SVPosVar);
 	}
@@ -787,10 +1061,15 @@ void CreateInterstageVarsForVertexAndPixelShaders(ShaderFuzzingState* Fuzzer, Fu
 	for (int32 i = 0; i < NumAdditionalInterstageVars; i++)
 	{
 		FuzzShaderSemanticVar NewVar;
-		NewVar.ParamIdx = i + 1;
+		NewVar.ParamIdx = VertexShader->InterStageVars.size();
 		NewVar.Semantic = (ShaderSemantic)Fuzzer->GetIntInRange((int32)ShaderSemantic::INTER_FIRST, (int32)ShaderSemantic::INTER_LAST);
-		NewVar.VarName = GetRandomShaderVariableName(Fuzzer, "param");
-		VertexShader->IAVars.push_back(NewVar);
+		if (SemanticVarCounts[(int32)NewVar.Semantic] == 0)
+		{
+			SemanticVarCounts[(int32)NewVar.Semantic]++;
+			NewVar.VarName = GetRandomShaderVariableName(Fuzzer, "param");
+			VertexShader->InterStageVars.push_back(NewVar);
+			PixelShader->InterStageVars.push_back(NewVar);
+		}
 	}
 }
 
@@ -817,6 +1096,8 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 		VerifyShaderCompilation(&VertShader);
 		VerifyShaderCompilation(&PixelShader);
+
+		VerifyGraphicsPSOCompilation(Fuzzer, &VertShader, &PixelShader);
 
 		//LOG("==============\nShader source (vertex):----------");
 		//OutputDebugStringA(VertShader.SourceCode.c_str());
@@ -846,6 +1127,10 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 	}
 }
 
+
+// Errors:
+// Doing round 281 of fuzzing...
+// Compile of '<SHADER_FUZZ_FILE>' failed, hr = 0x80004005, err msg = 'C:\Users\Benji\Coding\D3D12Test\D3D12Test\<SHADER_FUZZ_FILE>(32,204-228): error X3004: undeclared identifier 'tempvar_40175_24811_45681'
 
 
 

@@ -2,6 +2,7 @@
 
 
 #include <stdint.h>
+#include <stdio.h>
 
 #define ASSERT(cond) do { if (!(cond)) { char output[4096] = {}; snprintf(output, sizeof(output), "[%s:%d] Assertion failed '%s'\n", __FILE__, __LINE__, #cond); OutputDebugStringA(output); DebugBreak(); } } while(0)
 

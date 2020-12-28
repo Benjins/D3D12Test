@@ -4,9 +4,11 @@
 #include <stdint.h>
 
 #include <vector>
+#include <thread>
 
 #include <Windows.h>
 
+#include <assert.h>
 
 #include <d3d12.h>
 
@@ -190,17 +192,17 @@ const char* VertexShaderCode =
 "	float4 color : COLOR;\n"
 "};\n"
 "\n"
-"Texture2D MyTexture;\n"
-"SamplerState MySampler;\n"
-"Texture2D MyOtherTexture;\n"
-"SamplerState MyOtherSampler;\n"
+"cbuffer MyBuffer1 : register(b0)\n"
+"{\n"
+"	float4 constant1;\n"
+"};\n"
 "\n"
 "PSInput MainVS(VSInput input)\n"
 "{\n"
 "	PSInput result;\n"
 "\n"
 "	result.position = input.position;\n"
-"	result.color = input.color + MyTexture.SampleLevel(MySampler,float2(0,0), 0) + MyOtherTexture.SampleLevel(MyOtherSampler,float2(0,0), 0);\n"
+"	result.color = input.color;\n"
 "\n"
 "	return result;\n"
 "}\n";
@@ -240,47 +242,11 @@ const char* PixelShaderCode =
 D3D12_SHADER_BYTECODE VertexShaderByteCode;
 D3D12_SHADER_BYTECODE PixelShaderByteCode;
 
-
 #include "shader_meta.h"
 
-D3D12_SHADER_BYTECODE CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, const char* ShaderSourceName, const char* EntryPoint) {
-	ID3DBlob* ByteCode = nullptr;
-	ID3DBlob* ErrorMsg = nullptr;
-	UINT CompilerFlags = D3DCOMPILE_DEBUG;
-	HRESULT hr = D3DCompile(ShaderCode, strlen(ShaderCode), ShaderSourceName, nullptr, nullptr, EntryPoint, GetTargetForShaderType(ShaderType), CompilerFlags, 0, &ByteCode, &ErrorMsg);
-	if (SUCCEEDED(hr)) {
-		D3D12_SHADER_BYTECODE ByteCodeObj;
-		ByteCodeObj.pShaderBytecode = ByteCode->GetBufferPointer();
-		ByteCodeObj.BytecodeLength = ByteCode->GetBufferSize();
+ShaderMetadata VertexShaderMeta;
+ShaderMetadata PixelShaderMeta;
 
-		ID3D12ShaderReflection* ShaderReflection = nullptr;
-		hr = D3DReflect(ByteCodeObj.pShaderBytecode, ByteCodeObj.BytecodeLength, IID_PPV_ARGS(&ShaderReflection));
-
-		D3D12_SHADER_DESC ShaderDesc = {};
-		hr = ShaderReflection->GetDesc(&ShaderDesc);
-
-		D3D12_SIGNATURE_PARAMETER_DESC InputParamDescs[MAX_INPUT_PARAM_COUNT] = {};
-
-		for (int32 i = 0; i < ShaderDesc.InputParameters; i++)
-		{
-			hr = ShaderReflection->GetInputParameterDesc(i, &InputParamDescs[i]);
-		}
-
-		D3D12_SHADER_INPUT_BIND_DESC BoundResourceDescs[MAX_BOUND_RESOURCES] = {};
-
-		for (int32 i = 0; i < ShaderDesc.BoundResources; i++)
-		{
-			ShaderReflection->GetResourceBindingDesc(i, &BoundResourceDescs[i]);
-		}
-
-		return ByteCodeObj;
-	}
-	else {
-		LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, (ErrorMsg && ErrorMsg->GetBufferPointer()) ? (const char*)ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
-		ASSERT(false && "Fix the damn shaders");
-		return D3D12_SHADER_BYTECODE();
-	}
-}
 
 
 static bool shouldQuit = false;
@@ -334,19 +300,46 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
-		for (int32 i = 0; i < 10*1000; i++)
+		for (int32 i = 0; i < 10 * 1000; i++)
 		{
 			ShaderFuzzingState Fuzzer;
 			Fuzzer.D3DDevice = Device;
-	
-			SetSeedOnFuzzer(&Fuzzer, i + 10000);
-			DoIterationsWithFuzzer(&Fuzzer, 1);
 
-			if (i % 100 == 0)
-			{
-				LOG("run %d finished", i);
-			}
+			SetSeedOnFuzzer(&Fuzzer, i);
+			LOG("Doing round %d of fuzzing...", i);
+			DoIterationsWithFuzzer(&Fuzzer, 1);
 		}
+
+
+		// 4 on my machine uses like 70% of my CPU
+		//const int32 ThreadCount = 4;
+		//const int32 ThreadCount = 1;
+		//
+		//std::vector<std::thread> FuzzThreads;
+		//
+		//for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
+		//{
+		//	FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
+		//		for (int32 i = 0; i < 10 * 1000; i++)
+		//		{
+		//			ShaderFuzzingState Fuzzer;
+		//			Fuzzer.D3DDevice = Device;
+		//
+		//			SetSeedOnFuzzer(&Fuzzer, i + (TIdx * 1024 * 1024) + 1024 * 1024);
+		//			DoIterationsWithFuzzer(&Fuzzer, 1);
+		//
+		//			if (i % 100 == 0)
+		//			{
+		//				LOG("Thread %d run %d finished", TIdx, i);
+		//			}
+		//		}
+		//	});
+		//}
+		//
+		//for (auto& Thread : FuzzThreads)
+		//{
+		//	Thread.join();
+		//}
 	
 		return 0;
 	}
@@ -385,55 +378,87 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	D3DSystem.Swapchain = SwapChain;
 	D3DSystem.Window = window;
 
+	// Yeah they're globals...should have a way to pass down "assets" as well I guess, or maybe make the renderer do it idk
+	auto* VertexShaderByteCodeBlob = CompileShaderCode(VertexShaderCode, D3DShaderType::Vertex, "vertex.shader", "MainVS", &VertexShaderMeta);
+	VertexShaderByteCode.pShaderBytecode = VertexShaderByteCodeBlob->GetBufferPointer();
+	VertexShaderByteCode.BytecodeLength = VertexShaderByteCodeBlob->GetBufferSize();
+
+	auto* PixelShaderByteCodeBlob = CompileShaderCode(PixelShaderCode, D3DShaderType::Pixel, "pixel.shader", "MainPS", &PixelShaderMeta);
+	PixelShaderByteCode.pShaderBytecode = PixelShaderByteCodeBlob->GetBufferPointer();
+	PixelShaderByteCode.BytecodeLength = PixelShaderByteCodeBlob->GetBufferSize();
+
 	D3D12_ROOT_SIGNATURE_DESC RootSigDesc = {};
 	RootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-	constexpr const int NumRootParams = 3;
+	std::vector<D3D12_ROOT_PARAMETER> RootParams;
+	std::vector<D3D12_STATIC_SAMPLER_DESC> RootStaticSamplers;
 
-	RootSigDesc.NumParameters = NumRootParams;
-	D3D12_ROOT_PARAMETER RootParams[NumRootParams];
+	// TODO
+	std::vector<D3D12_DESCRIPTOR_RANGE> DescriptorRanges;
 
-	RootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	RootParams[0].Constants.Num32BitValues = 4;
-	RootParams[0].Constants.RegisterSpace = 0;
-	RootParams[0].Constants.ShaderRegister = 0;
-	RootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+	{
+		int32 NumSRVs = max(PixelShaderMeta.NumSRVs, VertexShaderMeta.NumSRVs);
+		int32 NumCBVs = max(PixelShaderMeta.NumCBVs, VertexShaderMeta.NumCBVs);
 
-	RootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-	RootParams[1].Descriptor.RegisterSpace = 0;
-	RootParams[1].Descriptor.ShaderRegister = 1;
-	RootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		int32 TotalRootParams = NumSRVs + NumCBVs;
+		RootParams.resize(TotalRootParams);
 
-	RootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-	RootParams[2].DescriptorTable.NumDescriptorRanges = 1;
-	D3D12_DESCRIPTOR_RANGE pDescriptorRange = {};
-	pDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	pDescriptorRange.BaseShaderRegister = 0;
-	pDescriptorRange.NumDescriptors = 1;
-	pDescriptorRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-	RootParams[2].DescriptorTable.pDescriptorRanges = &pDescriptorRange;
-	RootParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		DescriptorRanges.resize(TotalRootParams);
 
-	RootSigDesc.pParameters = RootParams;
+		int32 RootParamIdx = 0;
+		for (int32 SRVIdx = 0; SRVIdx < NumSRVs; SRVIdx++)
+		{
+			RootParams[RootParamIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+			RootParams[RootParamIdx].DescriptorTable.NumDescriptorRanges = 1;
+			
+			D3D12_DESCRIPTOR_RANGE& pDescriptorRange = DescriptorRanges[SRVIdx];
+			pDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+			pDescriptorRange.BaseShaderRegister = SRVIdx;
+			pDescriptorRange.NumDescriptors = 1;
+			pDescriptorRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-	RootSigDesc.NumStaticSamplers = 1;
+			RootParams[RootParamIdx].DescriptorTable.pDescriptorRanges = &pDescriptorRange;
+			RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-	D3D12_STATIC_SAMPLER_DESC Sampler = {};
-	Sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-	Sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-	Sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-	Sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-	Sampler.MipLODBias = 0;
-	Sampler.MaxAnisotropy = 0;
-	Sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-	Sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-	Sampler.MinLOD = 0.0f;
-	Sampler.MaxLOD = D3D12_FLOAT32_MAX;
-	Sampler.ShaderRegister = 0;
-	Sampler.RegisterSpace = 0;
-	Sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+			RootParamIdx++;
+		}
 
-	RootSigDesc.pStaticSamplers = &Sampler;
+		for (int32 CBVIdx = 0; CBVIdx < NumCBVs; CBVIdx++)
+		{
+			RootParams[RootParamIdx].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+			RootParams[RootParamIdx].Descriptor.RegisterSpace = 0;
+			RootParams[RootParamIdx].Descriptor.ShaderRegister = CBVIdx;
+			RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+			RootParamIdx++;
+		}
+
+		int32 TotalStaticSamplers = max(VertexShaderMeta.NumStaticSamplers, PixelShaderMeta.NumStaticSamplers);
+		RootStaticSamplers.resize(TotalStaticSamplers);
+
+		for (int32 i = 0; i < TotalStaticSamplers; i++)
+		{
+			RootStaticSamplers[i].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+			RootStaticSamplers[i].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+			RootStaticSamplers[i].AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+			RootStaticSamplers[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+			RootStaticSamplers[i].MipLODBias = 0;
+			RootStaticSamplers[i].MaxAnisotropy = 0;
+			RootStaticSamplers[i].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+			RootStaticSamplers[i].BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+			RootStaticSamplers[i].MinLOD = 0.0f;
+			RootStaticSamplers[i].MaxLOD = D3D12_FLOAT32_MAX;
+			RootStaticSamplers[i].ShaderRegister = 0;
+			RootStaticSamplers[i].RegisterSpace = 0;
+			RootStaticSamplers[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		}
+	}
+
+	RootSigDesc.NumParameters = RootParams.size();
+	RootSigDesc.pParameters = RootParams.data();
+
+	RootSigDesc.NumStaticSamplers = RootStaticSamplers.size();
+	RootSigDesc.pStaticSamplers = RootStaticSamplers.data();
 
 	ID3DBlob* RootSigBlob = nullptr;
 	ID3DBlob* RootSigErrorBlob = nullptr;
@@ -453,10 +478,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	Device->CreateRootSignature(0, RootSigBlob->GetBufferPointer(), RootSigBlob->GetBufferSize(), IID_PPV_ARGS(&RootSig));
 
 	D3DSystem.RootSignature = RootSig;
-
-	// Yeah they're globals...should have a way to pass down "assets" as well I guess, or maybe make the renderer do it idk
-	VertexShaderByteCode = CompileShaderCode(VertexShaderCode, D3DShaderType::Vertex, "vertex.shader", "MainVS");
-	PixelShaderByteCode = CompileShaderCode(PixelShaderCode, D3DShaderType::Pixel, "pixel.shader", "MainPS");
 
 	InitRendering(&D3DSystem);
 
@@ -733,9 +754,10 @@ void DoRendering(D3D12System* System)
 		ID3D12DescriptorHeap* ppHeaps[] = { System->TextureSRVHeap };
 		CommandList->SetDescriptorHeaps(1, ppHeaps);
 
-		CommandList->SetGraphicsRoot32BitConstants(0, 4, ConstantValues, 0);
+		CommandList->SetGraphicsRootDescriptorTable(0, System->TextureSRVHeap->GetGPUDescriptorHandleForHeapStart());
 		CommandList->SetGraphicsRootConstantBufferView(1, PSCBuffer->GetGPUVirtualAddress());
-		CommandList->SetGraphicsRootDescriptorTable(2, System->TextureSRVHeap->GetGPUDescriptorHandleForHeapStart());
+		//CommandList->SetGraphicsRootConstantBufferView(0, PSCBuffer->GetGPUVirtualAddress());
+		CommandList->SetGraphicsRootConstantBufferView(2, PSCBuffer->GetGPUVirtualAddress());
 
 		// D3D12 ERROR: ID3D12Device::CreateGraphicsPipelineState: Root Signature doesn't match Pixel Shader: 
 		// A Shader is declaring a resource object as a texture using a register mapped to a root descriptor SRV (ShaderRegister=0, RegisterSpace=0).
