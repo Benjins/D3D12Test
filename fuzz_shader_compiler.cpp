@@ -536,7 +536,10 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 		{
 			for (const auto& Var : OutShaderAST->InterStageVars)
 			{
+				// HACK: Make sure the variable doesn't persist
+				OutShaderAST->VariablesInScope.emplace_back();
 				auto* NewStmt = GenerateFuzzingShaderAssignment(Fuzzer, OutShaderAST);
+				OutShaderAST->VariablesInScope.pop_back();
 				NewStmt->IsPredeclared = true;
 				NewStmt->VariableName = std::string("result.") + Var.VarName;
 				RootNode->Statements.push_back(NewStmt);

@@ -110,6 +110,8 @@ ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, co
 	}
 	else {
 		LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, (ErrorMsg && ErrorMsg->GetBufferPointer()) ? (const char*)ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
+		LOG("Dumping shader source now");
+		OutputDebugStringA(ShaderCode);
 		ASSERT(false && "Fix the damn shaders");
 		return nullptr;
 	}
