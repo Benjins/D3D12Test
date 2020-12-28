@@ -3,23 +3,23 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-template<int capacity>
-struct StringStackBuffer {
-	char buffer[capacity];
-	int length;
+//template<int capacity>
+struct StringBuffer {
+	char* buffer = nullptr;
+	int capacity = 0;
+	int length = 0;
 
-	StringStackBuffer() {
+	explicit StringBuffer(int _capacity) {
+		capacity = _capacity;
+		buffer = (char*)malloc(capacity);
 		buffer[0] = '\0';
 		length = 0;
 	}
 
-	StringStackBuffer(const char* format, ...) {
-		buffer[0] = '\0';
-		length = 0;
-		va_list varArgs;
-		va_start(varArgs, format);
-		length += vsnprintf(buffer, capacity, format, varArgs);
-		va_end(varArgs);
+	~StringBuffer()
+	{
+		free(buffer);
+		buffer = nullptr;
 	}
 
 	void Append(const char* str) {

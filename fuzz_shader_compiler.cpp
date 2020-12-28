@@ -308,12 +308,14 @@ struct FuzzShaderAST
 	// Vertex->Pixel raster variables
 
 	std::string SourceCode;
-	D3D12_SHADER_BYTECODE ByteCode;
 	ID3DBlob* ByteCodeBlob = nullptr;
 	ShaderMetadata ShaderMeta;
 
 	~FuzzShaderAST()
 	{
+		// TODO: If we ever start drawing, this will need to be released after fence completes
+		ByteCodeBlob->Release();
+
 		for (auto* Node : AllocatedNodes)
 		{
 			if (Node->Type == FuzzShaderASTNode::NodeType::StatementBlock)
@@ -501,7 +503,7 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 
 	OutShaderAST->VariablesInScope.emplace_back();
 
-	int NumRootStatements = Fuzzer->GetIntInRange(2, 20);
+	int NumRootStatements = Fuzzer->GetIntInRange(4, 200);
 
 	for (int i = 0; i < NumRootStatements; i++)
 	{
@@ -559,7 +561,7 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 
 #define AST_SOURCE_LIMIT (16 * 1024)
 
-void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNode* Node, StringStackBuffer<AST_SOURCE_LIMIT>* StrBuf)
+void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNode* Node, StringBuffer* StrBuf)
 {
 	// TODO: Do Maybe cast construction w/ templates or w/e? Since we have the static type stuff
 	if (Node->Type == FuzzShaderASTNode::NodeType::Assignment)
@@ -650,7 +652,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
 {
 	// TODO: Maybe move this to heap and make it dynamic, idk
-	StringStackBuffer<AST_SOURCE_LIMIT> StrBuf;
+	StringBuffer StrBuf(1024 * 1024);
 
 	for (const auto& RootConstant : ShaderAST->RootConstants)
 	{
@@ -844,6 +846,9 @@ ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzi
 		int32 TotalStaticSamplers = max(NumVertexSamplers, NumPixelSamplers);
 		RootStaticSamplers.resize(TotalStaticSamplers);
 
+		//LOG("    VS=(%d CBV, %d SRV, %d Samplers)", NumVertexCBVs, NumVertexSRVs, NumVertexSamplers);
+		//LOG("    PS=(%d CBV, %d SRV, %d Samplers)", NumPixelCBVs, NumPixelSRVs, NumPixelSamplers);
+
 		for (int32 SamplerIdx = 0; SamplerIdx < TotalStaticSamplers; SamplerIdx++)
 		{
 			RootStaticSamplers[SamplerIdx].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -1006,6 +1011,11 @@ void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* Ver
 	// Compile PSO
 	ID3D12PipelineState* PSO = nullptr;
 	Fuzzer->D3DDevice->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
+
+	// TODO: If we're drawing stuff we need to keep these around
+	// and maybe we'd want to cache them, idk
+	RootSig->Release();
+	PSO->Release();
 }
 
 void VerifyComputePSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* ComputeShader)

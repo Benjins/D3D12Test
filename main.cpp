@@ -300,46 +300,59 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
-		for (int32 i = 0; i < 10 * 1000; i++)
-		{
-			ShaderFuzzingState Fuzzer;
-			Fuzzer.D3DDevice = Device;
-
-			SetSeedOnFuzzer(&Fuzzer, i);
-			LOG("Doing round %d of fuzzing...", i);
-			DoIterationsWithFuzzer(&Fuzzer, 1);
-		}
+		// Single threaded
+		//for (int32 i = 0; i < 10 * 1000; i++)
+		//{
+		//	ShaderFuzzingState Fuzzer;
+		//	Fuzzer.D3DDevice = Device;
+		//
+		//	SetSeedOnFuzzer(&Fuzzer, i);
+		//	LOG("Doing round %d of fuzzing...", i);
+		//	DoIterationsWithFuzzer(&Fuzzer, 1);
+		//}
 
 
 		// 4 on my machine uses like 70% of my CPU
-		//const int32 ThreadCount = 4;
+		const int32 ThreadCount = 4;
 		//const int32 ThreadCount = 1;
-		//
-		//std::vector<std::thread> FuzzThreads;
-		//
-		//for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
-		//{
-		//	FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
-		//		for (int32 i = 0; i < 10 * 1000; i++)
-		//		{
-		//			ShaderFuzzingState Fuzzer;
-		//			Fuzzer.D3DDevice = Device;
-		//
-		//			SetSeedOnFuzzer(&Fuzzer, i + (TIdx * 1024 * 1024) + 1024 * 1024);
-		//			DoIterationsWithFuzzer(&Fuzzer, 1);
-		//
-		//			if (i % 100 == 0)
-		//			{
-		//				LOG("Thread %d run %d finished", TIdx, i);
-		//			}
-		//		}
-		//	});
-		//}
-		//
-		//for (auto& Thread : FuzzThreads)
-		//{
-		//	Thread.join();
-		//}
+		
+		std::vector<std::thread> FuzzThreads;
+		
+		for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
+		{
+			FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
+				for (int32 i = 0; i < 10 * 1000; i++)
+				{
+					ShaderFuzzingState Fuzzer;
+					Fuzzer.D3DDevice = Device;
+		
+					uint64 InitialFuzzSeed = 0;
+
+					// If we want to have different fuzzing each process run. Good once a fuzzer is established.
+					InitialFuzzSeed += time(NULL) * 0x8D3F77LLU;
+
+					InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
+					InitialFuzzSeed += i;
+
+					// In theory can cause contention maybe or slow things down? Idk, can remove this
+					LOG("Fuzing with seed %llu", InitialFuzzSeed);
+					
+					SetSeedOnFuzzer(&Fuzzer, InitialFuzzSeed);
+					DoIterationsWithFuzzer(&Fuzzer, 1);
+		
+					// Helpful if we want some output to know that it's going but don't want spam
+					//if (i % 100 == 0)
+					//{
+					//	LOG("Thread %d run %d finished", TIdx, i);
+					//}
+				}
+			});
+		}
+		
+		for (auto& Thread : FuzzThreads)
+		{
+			Thread.join();
+		}
 	
 		return 0;
 	}
