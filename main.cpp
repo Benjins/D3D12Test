@@ -294,6 +294,14 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	ASSERT(ChosenAdapter != nullptr);
 
+	{
+		DXGI_ADAPTER_DESC ChosenAdapterDesc = {};
+		ChosenAdapter->GetDesc(&ChosenAdapterDesc);
+
+		OutputDebugStringW(L"\nChosen Adapter: ");
+		OutputDebugStringW(ChosenAdapterDesc.Description);
+		OutputDebugStringW(L"\n");
+	}
 
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
@@ -321,7 +329,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
 		{
 			FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
-				for (int32 i = 0; i < 10 * 1000; i++)
+				for (int32 i = 0; i < 128 * 1000; i++)
 				{
 					ShaderFuzzingState Fuzzer;
 					Fuzzer.D3DDevice = Device;

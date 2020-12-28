@@ -372,7 +372,7 @@ FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzSh
 
 		return Tex;
 	}
-	else if (Decider < 0.6 && OutShaderAST->GetNumVariablesInScope() > 0)
+	else if (Decider < 0.9 && OutShaderAST->GetNumVariablesInScope() > 0)
 	{
 		// Variable
 		auto* ReadVar = OutShaderAST->AllocateNode<FuzzShaderReadVariable>();

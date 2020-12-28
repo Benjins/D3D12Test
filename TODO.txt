@@ -1,0 +1,11 @@
+
+ - hack shader AST generation to have less stripped code
+ - generate DXBC or DXIL directly to better exercise lower-level compiler
+ - config so we can choose debug shaders or nah, which adapter to use, etc.
+ - generate valid shader -> mutate it so it's incorrect, and verify that the compiler rejects it (i.e. doesn't crash)
+ - generate compute shaders
+ - actually run shaders, possibly will require some constraints on them to make sure pixel shader would actually run
+
+
+
+

@@ -52,7 +52,7 @@ const char* GetTargetForShaderType(D3DShaderType Type) {
 ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, const char* ShaderSourceName, const char* EntryPoint, ShaderMetadata* OutMetadata) {
 	ID3DBlob* ByteCode = nullptr;
 	ID3DBlob* ErrorMsg = nullptr;
-	UINT CompilerFlags = D3DCOMPILE_DEBUG;
+	UINT CompilerFlags = 0;// D3DCOMPILE_DEBUG;
 	HRESULT hr = D3DCompile(ShaderCode, strlen(ShaderCode), ShaderSourceName, nullptr, nullptr, EntryPoint, GetTargetForShaderType(ShaderType), CompilerFlags, 0, &ByteCode, &ErrorMsg);
 	if (SUCCEEDED(hr)) {
 		ID3D12ShaderReflection* ShaderReflection = nullptr;
@@ -105,6 +105,8 @@ ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, co
 				OutMetadata->NumCBVs++;
 			}
 		}
+
+		ShaderReflection->Release();
 
 		return ByteCode;
 	}
