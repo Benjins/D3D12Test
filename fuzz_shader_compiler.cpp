@@ -54,6 +54,7 @@ struct FuzzShaderASTNode
 		ReadConstant,
 		ReadVariable,
 		Literal,
+		FuncCall,
 
 		StatementFirst,
 		Assignment = StatementFirst,
@@ -69,14 +70,24 @@ struct FuzzShaderASTNode
 	NodeType Type;
 };
 
+struct FuzzShaderFuncCall : FuzzShaderASTNode
+{
+	static constexpr NodeType StaticType = NodeType::FuncCall;
+
+	std::string FuncName;
+	std::vector<FuzzShaderASTNode*> Arguments;
+	int32 OutputSize = 0; // In 32-bit components, e.g. 1 = float 4 = float4
+};
+
 struct FuzzShaderBinaryOperator : FuzzShaderASTNode
 {
 	enum struct Operator
 	{
 		Add,
 		Subtract,
-		Multiple,
-		Divide
+		Multiply,
+		Divide,
+		Count
 	};
 
 
@@ -349,19 +360,53 @@ struct FuzzShaderAST
 	}
 };
 
+struct FuzzShaderBuiltinFuncInfo {
+	const char* Name = "";
+	int32 Arity = 0;
+	int32 OutputSize = 0;
+};
+
+FuzzShaderBuiltinFuncInfo BuiltinShaderFuncInfo[] = {
+	{ "dot", 2, 1},
+	{ "dst", 2, 4},
+	{ "any", 1, 1},
+	{ "all", 1, 1},
+	{ "abs", 1, 4},
+	{ "saturate", 1, 4},
+	{ "clamp", 3, 4},
+};
+
 FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderAST)
 {
 	float Decider = Fuzzer->GetFloat01();
 
-	if (Decider < 0.2)
+	if (Decider < 0.1)
 	{
 		// Binary Op
 		auto* BinaryOp = OutShaderAST->AllocateNode<FuzzShaderBinaryOperator>();
-		BinaryOp->Op = FuzzShaderBinaryOperator::Operator::Add;
+		BinaryOp->Op = (FuzzShaderBinaryOperator::Operator)Fuzzer->GetIntInRange(0, (int32)FuzzShaderBinaryOperator::Operator::Count - 1);
 		BinaryOp->LHS = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
 		BinaryOp->RHS = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
 
 		return BinaryOp;
+	}
+	else if (Decider < 0.3)
+	{
+		// Func call
+		auto* FuncCall = OutShaderAST->AllocateNode<FuzzShaderFuncCall>();
+
+		constexpr int32 NumBuiltins = ARRAY_COUNTOF(BuiltinShaderFuncInfo);
+
+		FuzzShaderBuiltinFuncInfo* BuiltinInfo = &BuiltinShaderFuncInfo[Fuzzer->GetIntInRange(0, NumBuiltins - 1)];
+
+		FuncCall->FuncName = BuiltinInfo->Name;
+		FuncCall->OutputSize = BuiltinInfo->OutputSize;
+		for (int32 i = 0; i < BuiltinInfo->Arity; i++)
+		{
+			FuncCall->Arguments.push_back(GenerateFuzzingShaderValue(Fuzzer, OutShaderAST));
+		}
+
+		return FuncCall;
 	}
 	else if (Decider < 0.5 && OutShaderAST->BoundTextures.size() > 0)
 	{
@@ -583,6 +628,18 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 		{
 			StrBuf->AppendFormat(" + ");
 		}
+		else if (Bin->Op == FuzzShaderBinaryOperator::Operator::Subtract)
+		{
+			StrBuf->AppendFormat(" - ");
+		}
+		else if (Bin->Op == FuzzShaderBinaryOperator::Operator::Multiply)
+		{
+			StrBuf->AppendFormat(" * ");
+		}
+		else if (Bin->Op == FuzzShaderBinaryOperator::Operator::Divide)
+		{
+			StrBuf->AppendFormat(" / ");
+		}
 		else
 		{
 			assert(false && "skjdfjk");
@@ -611,6 +668,38 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 	{
 		auto* Lit = static_cast<FuzzShaderLiteral*>(Node);
 		StrBuf->AppendFormat("float4(%f, %f, %f, %f)", Lit->Values[0], Lit->Values[1], Lit->Values[2], Lit->Values[3]);
+	}
+	else if (Node->Type == FuzzShaderASTNode::NodeType::FuncCall)
+	{
+		auto* FuncCall = static_cast<FuzzShaderFuncCall*>(Node);
+		int32 OutputSize = FuncCall->OutputSize;
+		ASSERT(OutputSize <= 4);
+
+		if (OutputSize < 4)
+		{
+			StrBuf->Append("float4(");
+		}
+
+		StrBuf->AppendFormat("%s(", FuncCall->FuncName.c_str());
+		for (int32 i = 0; i < FuncCall->Arguments.size(); i++)
+		{
+			if (i > 0)
+			{
+				StrBuf->Append(", ");
+			}
+			ConvertShaderASTNodeToSourceCode(ShaderAST, FuncCall->Arguments[i], StrBuf);
+		}
+		StrBuf->Append(")");
+
+		if (OutputSize < 4)
+		{
+			for (int32 i = OutputSize; i < 4; i++)
+			{
+				StrBuf->Append(", 1.0");
+			}
+			StrBuf->Append(")");
+		}
+
 	}
 	else if (Node->Type == FuzzShaderASTNode::NodeType::StatementBlock)
 	{
@@ -645,7 +734,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 	}
 	else
 	{
-		assert(false && "sdfljbasgfdjk");
+		ASSERT(false && "sdfljbasgfdjk");
 	}
 }
 
