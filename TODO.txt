@@ -1,6 +1,7 @@
 
- - more binary operations, and builtin functions
  - make user-defined funcs and structs and use them
+ - if statements and for loops
+ - ddx/ddy, clip or abort (kinda like GLSL discard)
  - hack shader AST generation to have less stripped code
  - generate DXBC or DXIL directly to better exercise lower-level compiler
  - Switch to dxcapi.h and dxcompiler.lib and use DXIL

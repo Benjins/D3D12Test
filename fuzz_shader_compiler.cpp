@@ -374,6 +374,10 @@ FuzzShaderBuiltinFuncInfo BuiltinShaderFuncInfo[] = {
 	{ "abs", 1, 4},
 	{ "saturate", 1, 4},
 	{ "clamp", 3, 4},
+	{ "ceil", 1, 4},
+	{ "sin", 1, 4},
+	{ "cos", 1, 4},
+	{ "atan2", 2, 4},
 };
 
 FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderAST)
@@ -1182,7 +1186,9 @@ void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed)
 
 void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 {
+	for (int32_t Iteration = 0; Iteration < NumIterations; Iteration++)
 	{
+
 		FuzzShaderAST VertShader, PixelShader;
 		VertShader.Type = D3DShaderType::Vertex;
 		PixelShader.Type = D3DShaderType::Pixel;
@@ -1199,6 +1205,13 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		VerifyShaderCompilation(&VertShader);
 		VerifyShaderCompilation(&PixelShader);
 
+		//uint64 FuzzerInit = Fuzzer->RNGState();
+		//WriteDataToFile(StringStackBuffer<256>("%llu_vertex.hlsl", FuzzerInit).buffer, VertShader.SourceCode.data(), VertShader.SourceCode.length());
+		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.hlsl", FuzzerInit).buffer, PixelShader.SourceCode.data(), PixelShader.SourceCode.length());
+		//
+		//WriteDataToFile(StringStackBuffer<256>("%llu_vertex.dxbc", FuzzerInit).buffer, VertShader.ByteCodeBlob->GetBufferPointer(), VertShader.ByteCodeBlob->GetBufferSize());\
+		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.dxbc", FuzzerInit).buffer, PixelShader.ByteCodeBlob->GetBufferPointer(), PixelShader.ByteCodeBlob->GetBufferSize());\
+
 		VerifyGraphicsPSOCompilation(Fuzzer, &VertShader, &PixelShader);
 
 		//LOG("==============\nShader source (vertex):----------");
@@ -1206,26 +1219,6 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		//LOG("---------\nShader source (pixel):---------");
 		//OutputDebugStringA(PixelShader.SourceCode.c_str());
 		//LOG("================");
-	}
-
-	return;
-
-	for (int32_t Iteration = 0; Iteration < NumIterations; Iteration++)
-	{
-		FuzzShaderAST VertShader, PixelShader;
-		VertShader.Type = D3DShaderType::Vertex;
-		PixelShader.Type = D3DShaderType::Pixel;
-
-		CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
-
-		// Set types
-		GenerateFuzzingShader(Fuzzer, &VertShader);
-		GenerateFuzzingShader(Fuzzer, &PixelShader);
-
-		VerifyShaderCompilation(&VertShader);
-		VerifyShaderCompilation(&PixelShader);
-
-		VerifyGraphicsPSOCompilation(Fuzzer, &VertShader, &PixelShader);
 	}
 }
 

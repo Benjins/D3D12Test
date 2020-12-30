@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <thread>
+#include <mutex>
 
 #include <Windows.h>
 
@@ -23,6 +24,7 @@
 #include "d3d12_ext.h"
 
 #include "fuzz_shader_compiler.h"
+#include "fuzz_dxbc.h"
 
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "d3dcompiler.lib")
@@ -117,6 +119,44 @@ struct CommandListReclaimer
 	ID3D12GraphicsCommandList* GetOpenCommandList(struct D3D12System* System, ID3D12CommandAllocator* CommandAllocator);
 };
 
+struct ResourceLifecycleManager
+{
+
+	struct Resource
+	{
+		ID3D12Resource* Ptr = nullptr;
+		D3D12_RESOURCE_DESC Desc = {};
+
+		uint64 ResourceID = 0;
+
+		uint64 FenceValueToWaitOn = 0;
+		
+		D3D12_RESOURCE_STATES CurrentState = D3D12_RESOURCE_STATE_COMMON;
+		int32 CmdListUseCount = 0;
+	};
+
+	uint64 CurrentResourceID = 0;
+
+	std::vector<Resource> LivingResources;
+	std::vector<Resource> ResourcesPendingDelete;
+	std::vector<Resource> ResourcesPendingCmdListFinish;
+
+
+	void AllocateResource(/*desc*/) { }
+	void AcquireResource(/*desc*/) { }
+	bool ReacquireResource(uint64 ResourceID, ID3D12Resource** OutRes) { }
+	void RelinquishResource(uint64 ResourceID /*Fence maybe?*/) { }
+	void RequestResourceDestroyed(uint64 ResourceID) { }
+
+	// Request resource state change...might need to be atomic w.r.t. the command list submit
+	// Ugh....but that would kill perf
+
+	// Alternative: each thread has its own resource pool?
+	// And if we wanted to share resources b/w them (like for MGPU) we could...do something...
+
+	void OnCommandListSubmitted() { }
+	void Tick() { }
+};
 
 #define NUM_BACKBUFFERS 3
 
@@ -306,74 +346,91 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
 
-	//if (0)
+	if (0)
 	{
-		//LARGE_INTEGER PerfFreq;
-		//QueryPerformanceFrequency(&PerfFreq);
-		//
-		//LARGE_INTEGER PerfStart;
-		//QueryPerformanceCounter(&PerfStart);
-		//
-		//const int32 TestCases = 1000;
-		//
-		//// Single threaded
-		//for (int32 i = 0; i < TestCases; i++)
-		//{
-		//	ShaderFuzzingState Fuzzer;
-		//	Fuzzer.D3DDevice = Device;
-		//
-		//	SetSeedOnFuzzer(&Fuzzer, i);
-		//	//LOG("Doing round %d of fuzzing...", i);
-		//	DoIterationsWithFuzzer(&Fuzzer, 1);
-		//}
-		//
-		//LARGE_INTEGER PerfEnd;
-		//QueryPerformanceCounter(&PerfEnd);
-		//
-		//double ElapsedTimeSeconds = (PerfEnd.QuadPart - PerfStart.QuadPart);
-		//ElapsedTimeSeconds = ElapsedTimeSeconds / PerfFreq.QuadPart;
-		//LOG("Ran %d test cases in %3.2f seconds, or %3.2f ms/case", TestCases, ElapsedTimeSeconds, (ElapsedTimeSeconds / TestCases) * 1000.0f);
+		const char* ExampleShaderFilename = "../example_shaders/9795564935892538031_pixel.dxbc";
 
-		// 4 on my machine uses like 70% of my CPU
-		//const int32 ThreadCount = 1;
-		
-		const int32 ThreadCount = 4;
-		std::vector<std::thread> FuzzThreads;
-		
-		for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
+		void* FileData = nullptr;
+		int32 FileSize = 0;
+		ReadDataFromFile(ExampleShaderFilename, &FileData, &FileSize);
+
+		ParseDXBCCode((byte*)FileData, FileSize);
+
+		return 0;
+	}
+
+	if (0)
+	{
+		bool bIsSingleThreaded = false;
+
+		if (bIsSingleThreaded)
 		{
-			FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
-				for (int32 i = 0; i < 128 * 1000; i++)
-				{
-					ShaderFuzzingState Fuzzer;
-					Fuzzer.D3DDevice = Device;
-		
-					uint64 InitialFuzzSeed = 0;
-		
-					// If we want to have different fuzzing each process run. Good once a fuzzer is established.
-					InitialFuzzSeed += time(NULL) * 0x8D3F77LLU;
-		
-					InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
-					InitialFuzzSeed += i;
-		
-					// In theory can cause contention maybe or slow things down? Idk, can remove this
-					LOG("Fuzing with seed %llu", InitialFuzzSeed);
-					
-					SetSeedOnFuzzer(&Fuzzer, InitialFuzzSeed);
-					DoIterationsWithFuzzer(&Fuzzer, 1);
-		
-					// Helpful if we want some output to know that it's going but don't want spam
-					//if (i % 100 == 0)
-					//{
-					//	LOG("Thread %d run %d finished", TIdx, i);
-					//}
-				}
-			});
+			LARGE_INTEGER PerfFreq;
+			QueryPerformanceFrequency(&PerfFreq);
+			
+			LARGE_INTEGER PerfStart;
+			QueryPerformanceCounter(&PerfStart);
+			
+			const int32 TestCases = 1000;
+			
+			// Single threaded
+			for (int32 i = 0; i < TestCases; i++)
+			{
+				ShaderFuzzingState Fuzzer;
+				Fuzzer.D3DDevice = Device;
+			
+				SetSeedOnFuzzer(&Fuzzer, i);
+				//LOG("Doing round %d of fuzzing...", i);
+				DoIterationsWithFuzzer(&Fuzzer, 1);
+			}
+			
+			LARGE_INTEGER PerfEnd;
+			QueryPerformanceCounter(&PerfEnd);
+			
+			double ElapsedTimeSeconds = (PerfEnd.QuadPart - PerfStart.QuadPart);
+			ElapsedTimeSeconds = ElapsedTimeSeconds / PerfFreq.QuadPart;
+			LOG("Ran %d test cases in %3.2f seconds, or %3.2f ms/case", TestCases, ElapsedTimeSeconds, (ElapsedTimeSeconds / TestCases) * 1000.0f);
 		}
-		
-		for (auto& Thread : FuzzThreads)
+		else
 		{
-			Thread.join();
+			const int32 ThreadCount = 4;
+			std::vector<std::thread> FuzzThreads;
+		
+			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
+			{
+				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
+					for (int32 i = 0; i < 128 * 1000; i++)
+					{
+						ShaderFuzzingState Fuzzer;
+						Fuzzer.D3DDevice = Device;
+		
+						uint64 InitialFuzzSeed = 0;
+		
+						// If we want to have different fuzzing each process run. Good once a fuzzer is established.
+						InitialFuzzSeed += time(NULL) * 0x8D3F77LLU;
+		
+						InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
+						InitialFuzzSeed += i;
+		
+						// In theory can cause contention maybe or slow things down? Idk, can remove this
+						LOG("Fuzing with seed %llu", InitialFuzzSeed);
+					
+						SetSeedOnFuzzer(&Fuzzer, InitialFuzzSeed);
+						DoIterationsWithFuzzer(&Fuzzer, 1);
+		
+						// Helpful if we want some output to know that it's going but don't want spam
+						//if (i % 100 == 0)
+						//{
+						//	LOG("Thread %d run %d finished", TIdx, i);
+						//}
+					}
+				});
+			}
+		
+			for (auto& Thread : FuzzThreads)
+			{
+				Thread.join();
+			}
 		}
 	
 		return 0;
