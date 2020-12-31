@@ -1118,14 +1118,124 @@ static D3D12_BLEND_DESC GetFuzzBlendStateDesc(ShaderFuzzingState* Fuzzer) {
 	Desc.AlphaToCoverageEnable = FALSE;
 	Desc.IndependentBlendEnable = FALSE;
 
-	const D3D12_RENDER_TARGET_BLEND_DESC DefaultRenderTargetBlendDesc =
-	{
-		FALSE,FALSE,
-		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
-		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+	const int32 BlendEnabledDecider = Fuzzer->GetIntInRange(0, 2);
+
+	const static bool IsLogicOpsEnabled = false;
+
+	const bool BlendEnable = (BlendEnabledDecider % 2) != 0;
+	const bool LogicOpEnable = IsLogicOpsEnabled && (BlendEnabledDecider / 2) != 0;
+
+	ASSERT(!(LogicOpEnable && BlendEnable));
+
+	const static D3D12_LOGIC_OP LogicOps[] = {
+		D3D12_LOGIC_OP_CLEAR,
+		D3D12_LOGIC_OP_SET,
+		D3D12_LOGIC_OP_COPY,
+		D3D12_LOGIC_OP_COPY_INVERTED,
 		D3D12_LOGIC_OP_NOOP,
-		D3D12_COLOR_WRITE_ENABLE_ALL,
+		D3D12_LOGIC_OP_INVERT,
+		D3D12_LOGIC_OP_AND,
+		D3D12_LOGIC_OP_NAND,
+		D3D12_LOGIC_OP_OR,
+		D3D12_LOGIC_OP_NOR,
+		D3D12_LOGIC_OP_XOR,
+		D3D12_LOGIC_OP_EQUIV,
+		D3D12_LOGIC_OP_AND_REVERSE,
+		D3D12_LOGIC_OP_AND_INVERTED,
+		D3D12_LOGIC_OP_OR_REVERSE,
+		D3D12_LOGIC_OP_OR_INVERTED
 	};
+
+	const static D3D12_BLEND BlendValuesSrcCol[] = {
+		D3D12_BLEND_ZERO,
+		D3D12_BLEND_ONE,
+		D3D12_BLEND_SRC_COLOR,
+		D3D12_BLEND_INV_SRC_COLOR,
+		D3D12_BLEND_BLEND_FACTOR,
+		D3D12_BLEND_INV_BLEND_FACTOR,
+		D3D12_BLEND_SRC1_COLOR,
+		D3D12_BLEND_INV_SRC1_COLOR
+	};
+
+	const static D3D12_BLEND BlendValuesSrcA[] = {
+		D3D12_BLEND_ZERO,
+		D3D12_BLEND_ONE,
+		D3D12_BLEND_SRC_ALPHA,
+		D3D12_BLEND_INV_SRC_ALPHA,
+		D3D12_BLEND_SRC1_ALPHA,
+		D3D12_BLEND_INV_SRC1_ALPHA,
+		D3D12_BLEND_BLEND_FACTOR,
+		D3D12_BLEND_INV_BLEND_FACTOR
+	};
+
+	const static D3D12_BLEND BlendValuesDstCol[] = {
+		D3D12_BLEND_ZERO,
+		D3D12_BLEND_ONE,
+		D3D12_BLEND_SRC_COLOR,
+		D3D12_BLEND_INV_SRC_COLOR,
+		D3D12_BLEND_DEST_COLOR,
+		D3D12_BLEND_INV_DEST_COLOR,
+		D3D12_BLEND_BLEND_FACTOR,
+		D3D12_BLEND_INV_BLEND_FACTOR
+	};
+
+	const static D3D12_BLEND BlendValuesDstA[] = {
+		D3D12_BLEND_ZERO,
+		D3D12_BLEND_ONE,
+		D3D12_BLEND_DEST_ALPHA,
+		D3D12_BLEND_INV_DEST_ALPHA,
+		D3D12_BLEND_BLEND_FACTOR,
+		D3D12_BLEND_INV_BLEND_FACTOR
+	};
+
+	const static D3D12_BLEND_OP BlendOps[] = {
+		D3D12_BLEND_OP_ADD,
+		D3D12_BLEND_OP_SUBTRACT,
+		D3D12_BLEND_OP_REV_SUBTRACT,
+		D3D12_BLEND_OP_MIN,
+		D3D12_BLEND_OP_MAX
+	};
+
+	const static D3D12_BLEND_OP BlendOpsNoMinMax[] = {
+		D3D12_BLEND_OP_ADD,
+		D3D12_BLEND_OP_SUBTRACT,
+		D3D12_BLEND_OP_REV_SUBTRACT
+	};
+
+	const static D3D12_COLOR_WRITE_ENABLE ColorWriteEnables[] = {
+		D3D12_COLOR_WRITE_ENABLE_RED,
+		D3D12_COLOR_WRITE_ENABLE_GREEN,
+		D3D12_COLOR_WRITE_ENABLE_BLUE,
+		D3D12_COLOR_WRITE_ENABLE_ALPHA,
+		D3D12_COLOR_WRITE_ENABLE_ALL
+	};
+
+	// D3D12 ERROR : ID3D12Device::CreateBlendState : SrcBlendAlpha[0] is trying to use a D3D11_BLEND value(0xa) that manipulates color, which is invalid.[STATE_CREATION ERROR #114: CREATEBLENDSTATE_INVALIDSRCBLENDALPHA]
+	// D3D12 ERROR : ID3D12Device::CreateBlendState : DestBlendAlpha[0] is trying to use a D3D11_BLEND value(0x11) that manipulates color, which is invalid.[STATE_CREATION ERROR #115: CREATEBLENDSTATE_INVALIDDESTBLENDALPHA]
+
+	// D3D12 ERROR : ID3D12Device::CreateBlendState : DestBlendAlpha[0] is trying to use a D3D11_BLEND value(0xa) that manipulates color, which is invalid.[STATE_CREATION ERROR #115: CREATEBLENDSTATE_INVALIDDESTBLENDALPHA]
+	// D3D12 ERROR : ID3D12Device::CreateBlendState : MIN or MAX are invalid for BlendOpAlpha when Dual - Source blending.[STATE_CREATION ERROR #116: CREATEBLENDSTATE_INVALIDBLENDOPALPHA]
+
+	D3D12_RENDER_TARGET_BLEND_DESC DefaultRenderTargetBlendDesc =
+	{
+		BlendEnable,LogicOpEnable,
+		BlendValuesSrcCol[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendValuesSrcCol) - 1)], BlendValuesDstCol[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendValuesDstCol) - 1)], BlendOps[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendOps) - 1)],
+		BlendValuesSrcA[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendValuesSrcA) - 1)], BlendValuesDstA[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendValuesDstA) - 1)], BlendOps[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendOps) - 1)],
+		LogicOps[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(LogicOps) - 1)],
+		// These are flags, so we actually want to have any combination of the bits
+		Fuzzer->GetIntInRange(1, D3D12_COLOR_WRITE_ENABLE_ALL),
+	};
+
+	// Cannot use min-max if we have multiple sources
+	if (DefaultRenderTargetBlendDesc.SrcBlend == D3D12_BLEND_SRC1_COLOR || DefaultRenderTargetBlendDesc.SrcBlend == D3D12_BLEND_INV_SRC1_COLOR)
+	{
+		DefaultRenderTargetBlendDesc.BlendOp = BlendOpsNoMinMax[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendOpsNoMinMax) - 1)];
+	}
+
+	if (DefaultRenderTargetBlendDesc.SrcBlendAlpha == D3D12_BLEND_SRC1_ALPHA || DefaultRenderTargetBlendDesc.SrcBlendAlpha == D3D12_BLEND_INV_SRC1_ALPHA)
+	{
+		DefaultRenderTargetBlendDesc.BlendOpAlpha = BlendOpsNoMinMax[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(BlendOpsNoMinMax) - 1)];
+	}
 
 	for (int i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
 		Desc.RenderTarget[i] = DefaultRenderTargetBlendDesc;
