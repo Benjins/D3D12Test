@@ -349,6 +349,11 @@ struct FuzzShaderAST
 				auto* Tex = (FuzzShaderTextureAccess*)Node;
 				Tex->~FuzzShaderTextureAccess();
 			}
+			else if (Node->Type == FuzzShaderASTNode::NodeType::FuncCall)
+			{
+				auto* Tex = (FuzzShaderFuncCall*)Node;
+				Tex->~FuzzShaderFuncCall();
+			}
 		}
 
 		for (const auto& Block : BlockAllocations)
@@ -944,10 +949,30 @@ ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzi
 
 		for (int32 SamplerIdx = 0; SamplerIdx < TotalStaticSamplers; SamplerIdx++)
 		{
-			RootStaticSamplers[SamplerIdx].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-			RootStaticSamplers[SamplerIdx].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-			RootStaticSamplers[SamplerIdx].AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-			RootStaticSamplers[SamplerIdx].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+			static const D3D12_FILTER TextureFilters[] = {
+				D3D12_FILTER_MIN_MAG_MIP_POINT,
+				D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR,
+				D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT,
+				D3D12_FILTER_MIN_POINT_MAG_MIP_LINEAR,
+				D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT,
+				D3D12_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR,
+				D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT,
+				D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+				D3D12_FILTER_ANISOTROPIC,
+			};
+
+			static const D3D12_TEXTURE_ADDRESS_MODE TextureAddrModes[] = {
+				D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+				D3D12_TEXTURE_ADDRESS_MODE_MIRROR,
+				D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+				D3D12_TEXTURE_ADDRESS_MODE_BORDER,
+				D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE
+			};
+
+			RootStaticSamplers[SamplerIdx].Filter = TextureFilters[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(TextureFilters) - 1)];
+			RootStaticSamplers[SamplerIdx].AddressU = TextureAddrModes[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(TextureAddrModes) - 1)];;
+			RootStaticSamplers[SamplerIdx].AddressV = TextureAddrModes[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(TextureAddrModes) - 1)];;
+			RootStaticSamplers[SamplerIdx].AddressW = TextureAddrModes[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(TextureAddrModes) - 1)];;
 			RootStaticSamplers[SamplerIdx].MipLODBias = 0;
 			RootStaticSamplers[SamplerIdx].MaxAnisotropy = 0;
 			RootStaticSamplers[SamplerIdx].ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
@@ -1005,7 +1030,8 @@ ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzi
 }
 
 // TODO: Random, taking FuzzerState
-static D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc() {
+static D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc()
+{
 	D3D12_RASTERIZER_DESC Desc = {};
 	Desc.FillMode = D3D12_FILL_MODE_SOLID;
 	Desc.CullMode = D3D12_CULL_MODE_BACK;
@@ -1022,8 +1048,72 @@ static D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc() {
 	return Desc;
 }
 
+static D3D12_RASTERIZER_DESC GetFuzzRasterizerDesc(ShaderFuzzingState* Fuzzer)
+{
+	D3D12_RASTERIZER_DESC Desc = {};
+
+	static const D3D12_FILL_MODE FillModes[] = {
+		D3D12_FILL_MODE_WIREFRAME,
+		D3D12_FILL_MODE_SOLID
+	};
+
+	static const D3D12_CULL_MODE CullModes[] = {
+		D3D12_CULL_MODE_NONE,
+		D3D12_CULL_MODE_FRONT,
+		D3D12_CULL_MODE_BACK
+	};
+
+	static const D3D12_CONSERVATIVE_RASTERIZATION_MODE ConservativeRasterModes[] = {
+		D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF,
+		D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON
+	};
+
+	Desc.FillMode = FillModes[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(FillModes) - 1)];
+	Desc.CullMode = CullModes[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(CullModes) - 1)];
+	Desc.FrontCounterClockwise = (Fuzzer->GetFloat01() > 0.5f);
+	Desc.DepthBias = Fuzzer->GetFloat01();
+	Desc.DepthBiasClamp = Fuzzer->GetFloat01();
+	Desc.SlopeScaledDepthBias = Fuzzer->GetFloat01();
+	Desc.DepthClipEnable = TRUE;
+	Desc.MultisampleEnable = FALSE;
+	Desc.AntialiasedLineEnable = FALSE;
+	Desc.ForcedSampleCount = 0;
+	Desc.ConservativeRaster = ConservativeRasterModes[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(ConservativeRasterModes) - 1)];
+
+	// D3D12 ERROR: ID3D12Device::CreateRasterizerState: FillMode must be D3D12_FILL_MODE_SOLID when ConservativeRaster is D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON: FillMode = D3D12_FILL_MODE_WIREFRAME, ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON. [ STATE_CREATION ERROR #95: CREATERASTERIZERSTATE_INVALIDFILLMODE]
+
+	if (Desc.ConservativeRaster == D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON)
+	{
+		Desc.FillMode = D3D12_FILL_MODE_SOLID;
+	}
+
+	return Desc;
+}
+
 // TODO: Random, taking FuzzerState
 static D3D12_BLEND_DESC GetDefaultBlendStateDesc() {
+	D3D12_BLEND_DESC Desc = {};
+	Desc.AlphaToCoverageEnable = FALSE;
+	Desc.IndependentBlendEnable = FALSE;
+
+	const D3D12_RENDER_TARGET_BLEND_DESC DefaultRenderTargetBlendDesc =
+	{
+		FALSE,FALSE,
+		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+		D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+		D3D12_LOGIC_OP_NOOP,
+		D3D12_COLOR_WRITE_ENABLE_ALL,
+	};
+
+	for (int i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
+		Desc.RenderTarget[i] = DefaultRenderTargetBlendDesc;
+	}
+
+	return Desc;
+}
+
+static D3D12_BLEND_DESC GetFuzzBlendStateDesc(ShaderFuzzingState* Fuzzer) {
+	// TODO
 	D3D12_BLEND_DESC Desc = {};
 	Desc.AlphaToCoverageEnable = FALSE;
 	Desc.IndependentBlendEnable = FALSE;
@@ -1091,8 +1181,8 @@ void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* Ver
 	PSODesc.pRootSignature = RootSig;
 	PSODesc.VS = VertexShaderByteCode;
 	PSODesc.PS = PixelShaderByteCode;
-	PSODesc.RasterizerState = GetDefaultRasterizerDesc();
-	PSODesc.BlendState = GetDefaultBlendStateDesc();
+	PSODesc.RasterizerState = GetFuzzRasterizerDesc(Fuzzer);
+	PSODesc.BlendState = GetFuzzBlendStateDesc(Fuzzer);
 	PSODesc.DepthStencilState.DepthEnable = FALSE;
 	PSODesc.DepthStencilState.StencilEnable = FALSE;
 	PSODesc.SampleMask = UINT_MAX;

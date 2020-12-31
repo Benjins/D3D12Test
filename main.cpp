@@ -359,7 +359,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		return 0;
 	}
 
-	if (0)
+	//if (0)
 	{
 		bool bIsSingleThreaded = false;
 
