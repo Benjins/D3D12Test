@@ -119,13 +119,40 @@ struct CommandListReclaimer
 	ID3D12GraphicsCommandList* GetOpenCommandList(struct D3D12System* System, ID3D12CommandAllocator* CommandAllocator);
 };
 
+inline bool CompareD3D12ResourceDesc(const D3D12_RESOURCE_DESC& a, const D3D12_RESOURCE_DESC& b)
+{
+	if (a.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER && a.Dimension == b.Dimension)
+	{
+		return (a.Alignment == b.Alignment) && (a.Flags == b.Flags) && (a.Width == b.Width) && (a.Format == b.Format);
+	}
+	else
+	{
+		return false;
+	}
+}
+
 struct ResourceLifecycleManager
 {
+	struct ResourceDesc
+	{
+		D3D12_RESOURCE_DESC ResDesc;
+		bool IsUploadHeap = false;
+		uint32 CreationNodeIndex = 0;
+		uint32 NodeVisibilityMask = 0x01;
+
+		bool operator==(const ResourceDesc& Other) const
+		{
+			return CompareD3D12ResourceDesc(Other.ResDesc, ResDesc)
+				&& (Other.IsUploadHeap == IsUploadHeap)
+				&& (Other.CreationNodeIndex == CreationNodeIndex)
+				&& (Other.NodeVisibilityMask == NodeVisibilityMask);
+		}
+	};
 
 	struct Resource
 	{
 		ID3D12Resource* Ptr = nullptr;
-		D3D12_RESOURCE_DESC Desc = {};
+		ResourceDesc Desc;
 
 		uint64 ResourceID = 0;
 
@@ -135,18 +162,121 @@ struct ResourceLifecycleManager
 		int32 CmdListUseCount = 0;
 	};
 
+	ID3D12Device* D3DDevice = nullptr;
+
 	uint64 CurrentResourceID = 0;
 
 	std::vector<Resource> LivingResources;
 	std::vector<Resource> ResourcesPendingDelete;
 	std::vector<Resource> ResourcesPendingCmdListFinish;
 
+	uint64 AllocateResource(ResourceDesc Desc, ID3D12Resource** OutRes)
+	{
 
-	void AllocateResource(/*desc*/) { }
-	void AcquireResource(/*desc*/) { }
-	bool ReacquireResource(uint64 ResourceID, ID3D12Resource** OutRes) { }
-	void RelinquishResource(uint64 ResourceID /*Fence maybe?*/) { }
-	void RequestResourceDestroyed(uint64 ResourceID) { }
+		D3D12_HEAP_PROPERTIES Props = {};
+		Props.Type = (Desc.IsUploadHeap ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT);
+		const D3D12_RESOURCE_STATES InitialState = (Desc.IsUploadHeap ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_DEST);
+		HRESULT hr = D3DDevice->CreateCommittedResource(&Props, D3D12_HEAP_FLAG_NONE, &Desc.ResDesc, InitialState, nullptr, IID_PPV_ARGS(OutRes));
+		ASSERT(SUCCEEDED(hr));
+
+		Resource Res;
+		Res.Ptr = *OutRes;
+		Res.CmdListUseCount = 1;
+		Res.CurrentState = InitialState;
+		Res.ResourceID = CurrentResourceID;
+		CurrentResourceID++;
+
+		LivingResources.push_back(Res);
+		return Res.ResourceID;
+	}
+
+	uint64 AcquireResource(ResourceDesc Desc, ID3D12Resource** OutRes)
+	{
+		for (auto& Resource : LivingResources)
+		{
+			if (Resource.Desc == Desc)
+			{
+				// AddRef I guess?
+				*OutRes = Resource.Ptr;
+				Resource.CmdListUseCount++;
+				return Resource.ResourceID;
+			}
+		}
+
+		uint64 ResID = AllocateResource(Desc, OutRes);
+		return ResID;
+	}
+
+	void RelinquishResource(uint64 ResourceID)
+	{
+		for (auto& Resource : LivingResources)
+		{
+			if (Resource.ResourceID == ResourceID)
+			{
+				Resource.CmdListUseCount--;
+				return;
+			}
+		}
+
+		for (auto& Resource : ResourcesPendingDelete)
+		{
+			if (Resource.ResourceID == ResourceID)
+			{
+				Resource.CmdListUseCount--;
+				return;
+			}
+		}
+
+		ASSERT(false && "adkfubasfd");
+	}
+
+	void RequestResourceDestroyed(uint64 ResourceID)
+	{
+		for (int32 i = 0; i < LivingResources.size(); i++)
+		{
+			const auto& Resource = LivingResources[i];
+			if (Resource.ResourceID == ResourceID)
+			{
+				ResourcesPendingDelete.push_back(Resource);
+				LivingResources[i] = LivingResources.back();
+				LivingResources.pop_back();
+				return;
+			}
+		}
+	}
+
+	void OnFrameFenceSignaled(uint64 SignaledValue)
+	{
+		for (int32 i = 0; i < ResourcesPendingDelete.size(); i++)
+		{
+			auto& Resource = ResourcesPendingDelete[i];
+			if (Resource.CmdListUseCount == 0)
+			{
+				Resource.FenceValueToWaitOn = SignaledValue;
+				ResourcesPendingCmdListFinish.push_back(Resource);
+				ResourcesPendingDelete[i] = ResourcesPendingDelete.back();
+				ResourcesPendingDelete.pop_back();
+				i--;
+			}
+		}
+	}
+
+	void CheckIfFenceFinished(uint64 FrameFenceValue)
+	{
+		for (int32 i = 0; i < ResourcesPendingCmdListFinish.size(); i++)
+		{
+			auto& Resource = ResourcesPendingCmdListFinish[i];
+
+			if (Resource.FenceValueToWaitOn <= FrameFenceValue)
+			{
+				Resource.Ptr->Release();
+
+				ResourcesPendingCmdListFinish[i] = ResourcesPendingCmdListFinish.back();
+				ResourcesPendingCmdListFinish.pop_back();
+				i--;
+			}
+		}
+	}
 
 	// Request resource state change...might need to be atomic w.r.t. the command list submit
 	// Ugh....but that would kill perf
@@ -154,8 +284,8 @@ struct ResourceLifecycleManager
 	// Alternative: each thread has its own resource pool?
 	// And if we wanted to share resources b/w them (like for MGPU) we could...do something...
 
-	void OnCommandListSubmitted() { }
-	void Tick() { }
+	//void OnCommandListSubmitted() { }
+	//void Tick() { }
 };
 
 #define NUM_BACKBUFFERS 3
@@ -170,6 +300,8 @@ struct D3D12System {
 	ID3D12RootSignature* RootSignature = nullptr;
 
 	CommandListReclaimer CmdListReclaimer;
+
+	ResourceLifecycleManager ResMgr;
 
 	ID3D12Resource* BackbufferResources[NUM_BACKBUFFERS] = {};
 	D3D12_CPU_DESCRIPTOR_HANDLE RTVHandles[NUM_BACKBUFFERS] = {};
@@ -348,6 +480,17 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	if (0)
 	{
+		// Resources I guess?
+
+		//ResourceLifecycleManager ResourceMgr;
+		//ResourceMgr.D3DDevice = Device;
+
+
+		return 0;
+	}
+
+	if (0)
+	{
 		const char* ExampleShaderFilename = "../example_shaders/9795564935892538031_pixel.dxbc";
 
 		void* FileData = nullptr;
@@ -359,7 +502,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		return 0;
 	}
 
-	//if (0)
+	if (0)
 	{
 		bool bIsSingleThreaded = false;
 
@@ -467,6 +610,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	D3D12System D3DSystem;
 	D3DSystem.Device = Device;
 	D3DSystem.DirectCommandQueue = CommandQueue;
+	D3DSystem.ResMgr.D3DDevice = Device;
 	D3DSystem.Swapchain = SwapChain;
 	D3DSystem.Window = window;
 
@@ -596,7 +740,8 @@ ID3D12Resource* TriangleVertData = nullptr;
 ID3D12Resource* PSCBuffer = nullptr;
 
 ID3D12Resource* TrianglePixelTexture = nullptr;
-ID3D12Resource* TrianglePixelTextureUpload = nullptr;
+uint64 TrianglePixelTextureResID = 0;
+
 
 D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc() {
 	D3D12_RASTERIZER_DESC Desc = {};
@@ -681,34 +826,26 @@ void DoRendering(D3D12System* System)
 	// TODO: Miiiii....texture streaming....lmao except not at all streamed
 	if (TrianglePixelTexture == nullptr)
 	{
-		D3D12_HEAP_PROPERTIES HeapProps = {};
-		HeapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
 		const int32 TextureWidth = 512;
 		const int32 TextureHeight = 512;
 
 		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, TextureWidth, TextureHeight, 1, 1);
 		D3D12_RESOURCE_DESC UploadResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(TextureWidth * TextureHeight * 4); // 4bpp
 
-		HRESULT hr = System->Device->CreateCommittedResource(
-			&HeapProps,
-			D3D12_HEAP_FLAG_NONE,
-			&UploadResourceDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&TrianglePixelTextureUpload));
+		ID3D12Resource* TrianglePixelTextureUpload = nullptr;
 
-		ASSERT(SUCCEEDED(hr));
+		ResourceLifecycleManager::ResourceDesc ResDesc, UploadResDesc;
+		ResDesc.ResDesc = ResourceDesc;
+		ResDesc.IsUploadHeap = false;
+		UploadResDesc.ResDesc = UploadResourceDesc;
+		UploadResDesc.IsUploadHeap = true;
 
-		HeapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+		TrianglePixelTextureResID = System->ResMgr.AcquireResource(ResDesc, &TrianglePixelTexture);
+		uint64 UploadResID = System->ResMgr.AcquireResource(UploadResDesc, &TrianglePixelTextureUpload);
 
-		hr = System->Device->CreateCommittedResource(
-			&HeapProps,
-			D3D12_HEAP_FLAG_NONE,
-			&ResourceDesc,
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			nullptr,
-			IID_PPV_ARGS(&TrianglePixelTexture));
+		// Will be destroyed after next call to ExecuteCmdList finishes on the GPU
+		System->ResMgr.RelinquishResource(UploadResID);
+		System->ResMgr.RequestResourceDestroyed(UploadResID);
 
 		void* pTexturePixelData = nullptr;
 		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
@@ -764,6 +901,15 @@ void DoRendering(D3D12System* System)
 		System->Device->CreateShaderResourceView(TrianglePixelTexture, &srvDesc, System->TextureSRVHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 	
+	if (rand() % 10 == 0)
+	{
+		LOG("Relinquishing the triangle's texture data");
+		System->ResMgr.RelinquishResource(TrianglePixelTextureResID);
+		System->ResMgr.RequestResourceDestroyed(TrianglePixelTextureResID);
+		// RequestResourceDestroyed
+		TrianglePixelTexture = nullptr;
+	}
+
 	UINT backBufferIndex = GFrameCounter % NUM_BACKBUFFERS;
 
 	ID3D12Resource* BackbufferResource = System->BackbufferResources[backBufferIndex];
@@ -903,10 +1049,13 @@ void DoRendering(D3D12System* System)
 	System->DirectCommandQueue->Signal(System->FrameFence, System->FrameFenceValue);
 
 	System->CmdListReclaimer.CheckIfFenceFinished(System->FrameFence);
+	System->ResMgr.CheckIfFenceFinished(System->FrameFence->GetCompletedValue());
 
 	System->CmdListReclaimer.NowDoneWithCommandList(CommandList);
 	System->CmdListReclaimer.NowDoneWithCommandAllocator(CommandAllocator);
 	System->CmdListReclaimer.OnFrameFenceSignaled(System->FrameFenceValue);
+
+	System->ResMgr.OnFrameFenceSignaled(System->FrameFenceValue);
 
 	int SyncInterval = 1;
 	System->Swapchain->Present(SyncInterval, 0);
