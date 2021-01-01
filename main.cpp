@@ -897,11 +897,23 @@ void DoRendering(D3D12System* System)
 		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 		srvDesc.Texture2D.MipLevels = 1;
 
+		if (System->TextureSRVHeap == nullptr)
+		{
+			D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+			srvHeapDesc.NumDescriptors = 1;
+			srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+			HRESULT hr = System->Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&System->TextureSRVHeap));
+
+			ASSERT(SUCCEEDED(hr));
+		}
+
 		//D3D12 ERROR : ID3D12Device::CreateShaderResourceView : The Dimensions of the View are invalid due to at least one of the following conditions.MostDetailedMip(value = 0) must be between 0 and MipLevels - 1 of the Texture Resource, 9, inclusively.With the current MostDetailedMip, MipLevels(value = 0) must be between 1 and 10, inclusively, or -1 to default to all mips from MostDetailedMip, in order that the View fit on the Texture.[STATE_CREATION ERROR #31: CREATESHADERRESOURCEVIEW_INVALIDDIMENSIONS]
 		System->Device->CreateShaderResourceView(TrianglePixelTexture, &srvDesc, System->TextureSRVHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 	
-	if (rand() % 10 == 0)
+	bool bDestroyResources = (rand() % 10 == 0);
+	if (bDestroyResources)
 	{
 		LOG("Relinquishing the triangle's texture data");
 		System->ResMgr.RelinquishResource(TrianglePixelTextureResID);
@@ -1062,6 +1074,12 @@ void DoRendering(D3D12System* System)
 
 	//LOG("We did it, swapchain just presented");
 
+	if (bDestroyResources)
+	{
+		// TODO: Leaking
+		System->TextureSRVHeap = nullptr;
+	}
+
 	GFrameCounter++;
 }
 
@@ -1152,17 +1170,6 @@ void InitRendering(D3D12System* System)
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
 			IID_PPV_ARGS(&PSCBuffer));
-
-		ASSERT(SUCCEEDED(hr));
-	}
-
-	if (System->TextureSRVHeap == nullptr)
-	{
-		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-		srvHeapDesc.NumDescriptors = 1;
-		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		HRESULT hr = System->Device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&System->TextureSRVHeap));
 
 		ASSERT(SUCCEEDED(hr));
 	}
