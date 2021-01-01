@@ -10,6 +10,10 @@
  - generate valid shader -> mutate it so it's incorrect, and verify that the compiler rejects it (i.e. doesn't crash)
  - generate compute shaders
  - actually run shaders, possibly will require some constraints on them to make sure pixel shader would actually run
+ 
+ 
+Follow-ups:
+ - Look at commits 60b3a2b2f9ad9947fdc169a7b4149f96e3c5c2ed and its parent b0360551b906e5478d01e9ce48dace4467ec51de...the parent has a bug (in user code) but it wasn't caught by validation. What happens if we hammer on it?
 
 
 
