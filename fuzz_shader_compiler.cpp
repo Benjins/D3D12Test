@@ -18,6 +18,8 @@
 
 #include "string_stack_buffer.h"
 
+#include "d3d_resource_mgr.h"
+
 #include <assert.h>
 #include <unordered_map>
 
@@ -1413,6 +1415,17 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.dxbc", FuzzerInit).buffer, PixelShader.ByteCodeBlob->GetBufferPointer(), PixelShader.ByteCodeBlob->GetBufferSize());\
 
 		VerifyGraphicsPSOCompilation(Fuzzer, &VertShader, &PixelShader);
+
+		// Create resources (including backbuffer?)
+
+		// Get command list + command allocator
+
+		// Setup resources (resource transitions?)
+		// Set resources in cmd list and IA vertex stuff
+
+		// Schedule write
+
+		// Randomly destroy some resources
 
 		//LOG("==============\nShader source (vertex):----------");
 		//OutputDebugStringA(VertShader.SourceCode.c_str());
