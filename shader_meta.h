@@ -7,6 +7,7 @@
 
 
 #define MAX_INPUT_PARAM_COUNT 16
+#define MAX_CBV_COUNT 64
 #define MAX_BOUND_RESOURCES 64
 
 
@@ -43,6 +44,8 @@ struct ShaderMetadata
 {
 	//int32 NumInlineConstants = 0;
 	int32 NumCBVs = 0;
+	int32 CBVSizes[MAX_CBV_COUNT] = {};
+
 	int32 NumSRVs = 0;
 	int32 NumStaticSamplers = 0;
 

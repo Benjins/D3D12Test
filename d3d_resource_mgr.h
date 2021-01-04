@@ -49,6 +49,12 @@ struct ResourceLifecycleManager
 		int32 CmdListUseCount = 0;
 	};
 
+	struct ResourceToTransition
+	{
+		uint64 ResourceID = 0;
+		D3D12_RESOURCE_STATES NextState;
+	};
+
 	ID3D12Device* D3DDevice = nullptr;
 
 	uint64 CurrentResourceID = 0;
@@ -77,11 +83,24 @@ struct ResourceLifecycleManager
 		return Res.ResourceID;
 	}
 
+	Resource* InternalGetResourceByID(uint64 ResID)
+	{
+		for (auto& Resource : LivingResources)
+		{
+			if (Resource.ResourceID == ResID)
+			{
+				return &Resource;
+			}
+		}
+
+		return nullptr;
+	}
+
 	uint64 AcquireResource(ResourceDesc Desc, ID3D12Resource** OutRes)
 	{
 		for (auto& Resource : LivingResources)
 		{
-			if (Resource.Desc == Desc)
+			if (Resource.Desc == Desc && Resource.CmdListUseCount == 0)
 			{
 				// AddRef I guess?
 				*OutRes = Resource.Ptr;
@@ -163,6 +182,34 @@ struct ResourceLifecycleManager
 				i--;
 			}
 		}
+	}
+
+	void PerformResourceTransitions(const std::vector<ResourceToTransition>& ResourceTransitions, ID3D12GraphicsCommandList* CommandList)
+	{
+
+		std::vector<D3D12_RESOURCE_BARRIER> Barriers;
+		
+		for (const auto& ResourceTransition : ResourceTransitions)
+		{
+			if (auto* Resource = InternalGetResourceByID(ResourceTransition.ResourceID))
+			{
+				if (Resource->CurrentState != ResourceTransition.NextState)
+				{
+					D3D12_RESOURCE_BARRIER Barrier = {};
+					Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+					Barrier.Transition.pResource = Resource->Ptr;
+					Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+					Barrier.Transition.StateBefore = Resource->CurrentState;
+					Barrier.Transition.StateAfter = ResourceTransition.NextState;
+
+					Barriers.push_back(Barrier);
+
+					Resource->CurrentState = ResourceTransition.NextState;
+				}
+			}
+		}
+		
+		CommandList->ResourceBarrier(Barriers.size(), Barriers.data());
 	}
 
 	// Request resource state change...might need to be atomic w.r.t. the command list submit

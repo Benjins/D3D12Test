@@ -857,7 +857,38 @@ void VerifyShaderCompilation(FuzzShaderAST* ShaderAST)
 	//}
 }
 
-ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader)
+struct RootSigResourceDesc
+{
+	struct CBVDesc {
+		int32 RootSigSlot = 0;
+		int32 BufferSize = 0;
+	};
+
+	struct TexDesc {
+		int32 RootSigSlot = 0;
+	};
+
+	std::vector<CBVDesc> CBVDescs;
+	std::vector<TexDesc> TexDescs;
+
+	void AddCBVDesc(int32 RootSigSlot, int32 BufferSize)
+	{
+		CBVDesc Desc;
+		Desc.RootSigSlot = RootSigSlot;
+		Desc.BufferSize = BufferSize;
+		CBVDescs.push_back(Desc);
+	}
+
+	void AddTexDesc(int32 RootSigSlot)
+	{
+		TexDesc Desc;
+		Desc.RootSigSlot = RootSigSlot;
+		TexDescs.push_back(Desc);
+	}
+};
+
+
+ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader, RootSigResourceDesc* OutRootSigResDesc)
 {
 	D3D12_ROOT_SIGNATURE_DESC RootSigDesc = {};
 	RootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -912,6 +943,8 @@ ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzi
 				assert(false && "asjsfauk");
 			}
 
+			OutRootSigResDesc->AddTexDesc(RootParamIdx);
+
 			RootParamIdx++;
 		}
 
@@ -921,22 +954,29 @@ ID3D12RootSignature* CreateGraphicsRootSignatureFromVertexShaderMeta(ShaderFuzzi
 			RootParams[RootParamIdx].Descriptor.RegisterSpace = 0;
 			RootParams[RootParamIdx].Descriptor.ShaderRegister = CBVIdx;
 			
+			int32 CBVSize = 0;
+
 			if (CBVIdx < NumVertexCBVs && CBVIdx < NumPixelCBVs)
 			{
 				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+				CBVSize = max(VertexShader->ShaderMeta.CBVSizes[CBVIdx], PixelShader->ShaderMeta.CBVSizes[CBVIdx]);
 			}
 			else if (CBVIdx < NumVertexCBVs)
 			{
 				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+				CBVSize = VertexShader->ShaderMeta.CBVSizes[CBVIdx];
 			}
 			else if (CBVIdx < NumPixelCBVs)
 			{
 				RootParams[RootParamIdx].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+				CBVSize = PixelShader->ShaderMeta.CBVSizes[CBVIdx];
 			}
 			else
 			{
 				assert(false && "asjsfauk");
 			}
+
+			OutRootSigResDesc->AddCBVDesc(RootParamIdx, CBVSize);
 
 			RootParamIdx++;
 		}
@@ -1266,10 +1306,11 @@ void FillOutPSOInputElements(std::vector<D3D12_INPUT_ELEMENT_DESC>* OutInputElem
 	}
 }
 
-void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader)
+
+void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* VertexShader, FuzzShaderAST* PixelShader, ID3D12RootSignature** OutRootSig, ID3D12PipelineState** OutPSO, RootSigResourceDesc* OutRootSigDesc)
 {
 	// Determine root signature
-	ID3D12RootSignature* RootSig = CreateGraphicsRootSignatureFromVertexShaderMeta(Fuzzer, VertexShader, PixelShader);
+	ID3D12RootSignature* RootSig = CreateGraphicsRootSignatureFromVertexShaderMeta(Fuzzer, VertexShader, PixelShader, OutRootSigDesc);
 
 	// Create PSO description
 	std::vector<D3D12_INPUT_ELEMENT_DESC> InputElementDescs;
@@ -1307,10 +1348,13 @@ void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* Ver
 	ID3D12PipelineState* PSO = nullptr;
 	Fuzzer->D3DDevice->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
 
+	*OutRootSig = RootSig;
+	*OutPSO = PSO;
+
 	// TODO: If we're drawing stuff we need to keep these around
 	// and maybe we'd want to cache them, idk
-	RootSig->Release();
-	PSO->Release();
+	//RootSig->Release();
+	//PSO->Release();
 }
 
 void VerifyComputePSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* ComputeShader)
@@ -1386,6 +1430,35 @@ void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed)
 	Fuzzer->RNGState.seed(Seed);
 }
 
+void SetRandomBytes(ShaderFuzzingState* Fuzzer, void* Buffer, int32 Size)
+{
+	byte* ByteBuffer = (byte*)Buffer;
+
+	for (int32 i = 0; i < Size; i++)
+	{
+		ByteBuffer[i] = (byte)Fuzzer->GetIntInRange(0, 255);
+	}
+}
+
+void CopyTextureResource(ID3D12GraphicsCommandList* CommandList, ID3D12Resource* TextureUploadResource, ID3D12Resource* TextureResource, int32 Width, int32 Height, int32 Pitch)
+{
+	D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};
+	CopyLocSrc.pResource = TextureUploadResource;
+	CopyLocSrc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+	CopyLocSrc.PlacedFootprint.Offset = 0;
+	CopyLocSrc.PlacedFootprint.Footprint.Width = Width;
+	CopyLocSrc.PlacedFootprint.Footprint.Height = Height;
+	CopyLocSrc.PlacedFootprint.Footprint.Depth = 1;
+	CopyLocSrc.PlacedFootprint.Footprint.RowPitch = Pitch;
+	CopyLocSrc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+	CopyLocDst.pResource = TextureResource;
+	CopyLocDst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+	CopyLocDst.SubresourceIndex = 0;
+
+	CommandList->CopyTextureRegion(&CopyLocDst, 0, 0, 0, &CopyLocSrc, nullptr);
+}
+
 void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 {
 	for (int32_t Iteration = 0; Iteration < NumIterations; Iteration++)
@@ -1411,21 +1484,297 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		//WriteDataToFile(StringStackBuffer<256>("%llu_vertex.hlsl", FuzzerInit).buffer, VertShader.SourceCode.data(), VertShader.SourceCode.length());
 		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.hlsl", FuzzerInit).buffer, PixelShader.SourceCode.data(), PixelShader.SourceCode.length());
 		//
-		//WriteDataToFile(StringStackBuffer<256>("%llu_vertex.dxbc", FuzzerInit).buffer, VertShader.ByteCodeBlob->GetBufferPointer(), VertShader.ByteCodeBlob->GetBufferSize());\
-		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.dxbc", FuzzerInit).buffer, PixelShader.ByteCodeBlob->GetBufferPointer(), PixelShader.ByteCodeBlob->GetBufferSize());\
+		//WriteDataToFile(StringStackBuffer<256>("%llu_vertex.dxbc", FuzzerInit).buffer, VertShader.ByteCodeBlob->GetBufferPointer(), VertShader.ByteCodeBlob->GetBufferSize());
+		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.dxbc", FuzzerInit).buffer, PixelShader.ByteCodeBlob->GetBufferPointer(), PixelShader.ByteCodeBlob->GetBufferSize());
 
-		VerifyGraphicsPSOCompilation(Fuzzer, &VertShader, &PixelShader);
+		ID3D12RootSignature* RootSig = nullptr;
+		ID3D12PipelineState* PSO = nullptr;
+		RootSigResourceDesc RootSigDesc;
+
+		VerifyGraphicsPSOCompilation(Fuzzer, &VertShader, &PixelShader, &RootSig, &PSO, &RootSigDesc);
+
+		ID3D12CommandAllocator* CommandAllocator = Fuzzer->D3DPersist->CmdListMgr.GetOpenCommandAllocator();
+		if (CommandAllocator == nullptr)
+		{
+			ASSERT(SUCCEEDED(Fuzzer->D3DDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator))));
+		}
+
+		ID3D12GraphicsCommandList* CommandList = Fuzzer->D3DPersist->CmdListMgr.GetOpenCommandList(CommandAllocator);
+		if (CommandList == nullptr)
+		{
+			ASSERT(SUCCEEDED(Fuzzer->D3DDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
+		}
+
+		std::vector<ResourceLifecycleManager::ResourceToTransition> BufferedResourceTransitions;
+
+		auto TransitionResource = [&](uint64 ResID, D3D12_RESOURCE_STATES States)
+		{
+			ResourceLifecycleManager::ResourceToTransition ResTrans;
+			ResTrans.ResourceID = ResID;
+			ResTrans.NextState = States;
+
+			BufferedResourceTransitions.push_back(ResTrans);
+		};
+
+		auto FlushResourceTransitions = [&]()
+		{
+			Fuzzer->D3DPersist->ResourceMgr.PerformResourceTransitions(BufferedResourceTransitions, CommandList);
+			BufferedResourceTransitions.clear();
+		};
+
+		const int32 RTWidth = 512;
+		const int32 RTHeight = 512;
 
 		// Create resources (including backbuffer?)
+		ID3D12Resource* BackBufferResource = nullptr;
+		std::vector<uint64> AllResourcesInUse;
+		{
+			ResourceLifecycleManager::ResourceDesc BackBufferDesc = {};
+			BackBufferDesc.NodeVisibilityMask = 0x01;
+			BackBufferDesc.IsUploadHeap = false;
+			BackBufferDesc.ResDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			BackBufferDesc.ResDesc.Width = RTWidth;
+			BackBufferDesc.ResDesc.Height = RTHeight;
+			BackBufferDesc.ResDesc.DepthOrArraySize = 1;
+			BackBufferDesc.ResDesc.SampleDesc.Count = 1;
+			BackBufferDesc.ResDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+			BackBufferDesc.ResDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 
-		// Get command list + command allocator
+			uint64 BackBufferResourceID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(BackBufferDesc, &BackBufferResource);
+			AllResourcesInUse.push_back(BackBufferResourceID);
+
+			TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		}
+
+		CommandList->SetPipelineState(PSO);
+		CommandList->SetGraphicsRootSignature(RootSig);
+
+		{
+			D3D12_VIEWPORT Viewport = {};
+			Viewport.MinDepth = 0;
+			Viewport.MaxDepth = 1;
+			Viewport.TopLeftX = 0;
+			Viewport.TopLeftY = 0;
+			Viewport.Width = RTWidth;
+			Viewport.Height = RTHeight;
+			CommandList->RSSetViewports(1, &Viewport);
+
+			D3D12_RECT ScissorRect = {};
+			ScissorRect.left = 0;
+			ScissorRect.right = RTWidth;
+			ScissorRect.top = 0;
+			ScissorRect.bottom = RTHeight;
+			CommandList->RSSetScissorRects(1, &ScissorRect);
+
+			D3D12_DESCRIPTOR_HEAP_DESC DescriptorHeapDesc = {};
+			DescriptorHeapDesc.NumDescriptors = 1;
+			DescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+			
+			ID3D12DescriptorHeap* DescriptorHeap = nullptr;
+			Fuzzer->D3DDevice->CreateDescriptorHeap(&DescriptorHeapDesc, IID_PPV_ARGS(&DescriptorHeap));
+
+			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+			Fuzzer->D3DDevice->CreateRenderTargetView(BackBufferResource, nullptr, rtvHandle);
+
+			CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+		}
 
 		// Setup resources (resource transitions?)
+		
+		// These two need to correspond
+		std::vector<ID3D12DescriptorHeap*> SRVDescriptorHeaps;
+		std::vector<int32> DescriptorHeapRootSigSlot;
+
+		for (auto TexDesc : RootSigDesc.TexDescs)
+		{
+			const int32 TextureWidth = (1 << Fuzzer->GetIntInRange(6, 8));
+			const int32 TextureHeight = TextureWidth;
+			const int bpp = 4; // Assuming 32-bit format
+
+			const int32 BufferSize = TextureWidth * TextureHeight * bpp;
+
+			D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, TextureWidth, TextureHeight, 1, 1);
+			D3D12_RESOURCE_DESC UploadResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+
+			ID3D12Resource* TextureResource = nullptr;
+			ID3D12Resource* TextureUploadResource = nullptr;
+
+			ResourceLifecycleManager::ResourceDesc ResDesc, UploadResDesc;
+			ResDesc.ResDesc = ResourceDesc;
+			ResDesc.IsUploadHeap = false;
+			UploadResDesc.ResDesc = UploadResourceDesc;
+			UploadResDesc.IsUploadHeap = true;
+
+			uint64 ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(ResDesc, &TextureResource);
+			uint64 UploadResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(UploadResDesc, &TextureUploadResource);
+
+			void* pTexturePixelData = nullptr;
+			D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+			HRESULT hr = TextureUploadResource->Map(0, &readRange, &pTexturePixelData);
+			ASSERT(SUCCEEDED(hr));
+
+			SetRandomBytes(Fuzzer, pTexturePixelData, BufferSize);
+
+			TextureUploadResource->Unmap(0, nullptr);
+
+			// TODO: Resource barriers before and after
+			CopyTextureResource(CommandList, TextureUploadResource, TextureResource, TextureWidth, TextureHeight, TextureWidth * bpp);
+
+			D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			srvDesc.Texture2D.MipLevels = 1;
+
+			ID3D12DescriptorHeap* TextureSRVHeap = nullptr;
+
+			// TODO: Descriptor heap needs to go somewhere, maybe on texture?
+			D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+			srvHeapDesc.NumDescriptors = 1;
+			srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+			srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+			hr = Fuzzer->D3DDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&TextureSRVHeap));
+
+			ASSERT(SUCCEEDED(hr));
+
+			Fuzzer->D3DDevice->CreateShaderResourceView(TextureResource, &srvDesc, TextureSRVHeap->GetCPUDescriptorHandleForHeapStart());
+
+			SRVDescriptorHeaps.push_back(TextureSRVHeap);
+			DescriptorHeapRootSigSlot.push_back(TexDesc.RootSigSlot);
+
+			AllResourcesInUse.push_back(ResID);
+			AllResourcesInUse.push_back(UploadResID);
+
+			// TODO: Compute which one?
+			TransitionResource(ResID, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		}
+
+		// TODO: Set descriptor heaps and stuff
+		ASSERT(SRVDescriptorHeaps.size() == DescriptorHeapRootSigSlot.size());
+		for (int32 i = 0; i < SRVDescriptorHeaps.size(); i++)
+		{
+			//CommandList->SetDescriptorHeaps(SRVDescriptorHeaps.size(), SRVDescriptorHeaps.data());
+			CommandList->SetDescriptorHeaps(1, &SRVDescriptorHeaps[i]);
+			CommandList->SetGraphicsRootDescriptorTable(DescriptorHeapRootSigSlot[i], SRVDescriptorHeaps[i]->GetGPUDescriptorHandleForHeapStart());
+		}
+
+		for (auto CBVDesc : RootSigDesc.CBVDescs)
+		{
+			D3D12_RESOURCE_DESC CBVResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(CBVDesc.BufferSize);
+
+			ResourceLifecycleManager::ResourceDesc CBVResDesc;
+			CBVResDesc.ResDesc = CBVResourceDesc;
+			CBVResDesc.IsUploadHeap = true;
+
+			ID3D12Resource* D3DResource = nullptr;
+			auto ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(CBVResDesc, &D3DResource);
+
+			void* pBufferData = nullptr;
+			D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+			HRESULT hr = D3DResource->Map(0, &readRange, &pBufferData);
+			ASSERT(SUCCEEDED(hr));
+
+			SetRandomBytes(Fuzzer, pBufferData, CBVDesc.BufferSize);
+
+			D3DResource->Unmap(0, nullptr);
+
+			CommandList->SetGraphicsRootConstantBufferView(CBVDesc.RootSigSlot, D3DResource->GetGPUVirtualAddress());
+
+			//TransitionResource(ResID, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+			AllResourcesInUse.push_back(ResID);
+		}
+
 		// Set resources in cmd list and IA vertex stuff
 
-		// Schedule write
+		const int32 VertexCount = Fuzzer->GetIntInRange(10, 50);
+
+		for (int32 IAParamIdx = 0; IAParamIdx < VertShader.ShaderMeta.NumParams; IAParamIdx++)
+		{
+			auto ParamMeta = VertShader.ShaderMeta.InputParamMetadata[IAParamIdx];
+			int32 BufferSize = VertexCount * 16;
+
+			D3D12_RESOURCE_DESC VertResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+
+			ResourceLifecycleManager::ResourceDesc VertDesc;
+			VertDesc.ResDesc = VertResourceDesc;
+			VertDesc.IsUploadHeap = true;
+
+			ID3D12Resource* VertResource = nullptr;
+			uint64 ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(VertDesc, &VertResource);
+
+			void* pVertData = nullptr;
+			D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+			HRESULT hr = VertResource->Map(0, &readRange, &pVertData);
+			ASSERT(SUCCEEDED(hr));
+
+			float* pFloatData = (float*)pVertData;
+			if (ParamMeta.Semantic == ShaderSemantic::POSITION)
+			{
+				for (int32 i = 0; i < 4 * VertexCount; i += 4)
+				{
+					pFloatData[i + 0] = Fuzzer->GetFloatInRange(-1.0f, 1.0f);
+					pFloatData[i + 1] = Fuzzer->GetFloatInRange(-1.0f, 1.0f);
+					pFloatData[i + 2] = Fuzzer->GetFloat01();
+					pFloatData[i + 3] = Fuzzer->GetFloat01();
+				}
+			}
+			else
+			{
+				for (int32 i = 0; i < 4 * VertexCount; i++)
+				{
+					pFloatData[i] = Fuzzer->GetFloatInRange(-100.0f, 100.0f);
+				}
+			}
+
+			VertResource->Unmap(0, nullptr);
+
+			D3D12_VERTEX_BUFFER_VIEW vtbView = {};
+			vtbView.BufferLocation = VertResource->GetGPUVirtualAddress();
+			vtbView.SizeInBytes = BufferSize;
+			vtbView.StrideInBytes = 16;// *VertShader.ShaderMeta.NumParams; // I think????
+
+			CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			CommandList->IASetVertexBuffers(ParamMeta.ParamIndex, 1, &vtbView);
+
+			//TransitionResource(ResID, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+			AllResourcesInUse.push_back(ResID);
+		}
+		
+		FlushResourceTransitions();
+
+		CommandList->DrawInstanced(VertexCount, 1, 0, 0);
+
+		CommandList->Close();
+
+		for (auto ResID : AllResourcesInUse)
+		{
+			Fuzzer->D3DPersist->ResourceMgr.RelinquishResource(ResID);
+		}
+
+
+		ID3D12CommandList* CommandLists[] = { CommandList };
+		Fuzzer->D3DPersist->CmdQueue->ExecuteCommandLists(1, CommandLists);
+
+		Fuzzer->D3DPersist->CmdQueue->Signal(Fuzzer->D3DPersist->ExecFence, Fuzzer->D3DPersist->ExecFenceToSignal);
+
+		Fuzzer->D3DPersist->CmdListMgr.CheckIfFenceFinished(Fuzzer->D3DPersist->ExecFence->GetCompletedValue());
+		Fuzzer->D3DPersist->ResourceMgr.CheckIfFenceFinished(Fuzzer->D3DPersist->ExecFence->GetCompletedValue());
+
+		Fuzzer->D3DPersist->CmdListMgr.NowDoneWithCommandList(CommandList);
+		Fuzzer->D3DPersist->CmdListMgr.NowDoneWithCommandAllocator(CommandAllocator);
+		Fuzzer->D3DPersist->CmdListMgr.OnFrameFenceSignaled(Fuzzer->D3DPersist->ExecFenceToSignal);
+
+		Fuzzer->D3DPersist->ResourceMgr.OnFrameFenceSignaled(Fuzzer->D3DPersist->ExecFenceToSignal);
+		Fuzzer->D3DPersist->ExecFenceToSignal++;
 
 		// Randomly destroy some resources
+
+
+		// Should also figure out how to get rid of these when it's safe
+		// PSO->Release();
+		// RootSig->Release();
 
 		//LOG("==============\nShader source (vertex):----------");
 		//OutputDebugStringA(VertShader.SourceCode.c_str());
@@ -1436,9 +1785,15 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 }
 
 
-// Errors:
-// Doing round 281 of fuzzing...
-// Compile of '<SHADER_FUZZ_FILE>' failed, hr = 0x80004005, err msg = 'C:\Users\Benji\Coding\D3D12Test\D3D12Test\<SHADER_FUZZ_FILE>(32,204-228): error X3004: undeclared identifier 'tempvar_40175_24811_45681'
+void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ID3D12Device* Device)
+{
+	D3D12_COMMAND_QUEUE_DESC CmdQueueDesc = {};
+	CmdQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	ASSERT(SUCCEEDED(Device->CreateCommandQueue(&CmdQueueDesc, IID_PPV_ARGS(&Persist->CmdQueue))));
+
+	ASSERT(SUCCEEDED(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Persist->ExecFence))));
+}
+
 
 
 

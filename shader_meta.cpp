@@ -79,8 +79,6 @@ ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, co
 			OutMetadata->NumParams++;
 		}
 
-		D3D12_SHADER_INPUT_BIND_DESC BoundResourceDescs[MAX_BOUND_RESOURCES] = {};
-
 		OutMetadata->NumCBVs = 0;
 		OutMetadata->NumSRVs = 0;
 		OutMetadata->NumStaticSamplers = 0;
@@ -89,21 +87,32 @@ ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, co
 
 		for (int32 i = 0; i < ShaderDesc.BoundResources; i++)
 		{
-			ShaderReflection->GetResourceBindingDesc(i, &BoundResourceDescs[i]);
+			D3D12_SHADER_INPUT_BIND_DESC BoundResourceDesc;
+			ShaderReflection->GetResourceBindingDesc(i, &BoundResourceDesc);
 
-			if (BoundResourceDescs[i].Type == D3D_SIT_TEXTURE)
+			if (BoundResourceDesc.Type == D3D_SIT_TEXTURE)
 			{
 				OutMetadata->NumSRVs++;
 			}
-			else if (BoundResourceDescs[i].Type == D3D_SIT_SAMPLER)
+			else if (BoundResourceDesc.Type == D3D_SIT_SAMPLER)
 			{
 				OutMetadata->NumStaticSamplers++;
 			}
-			else if (BoundResourceDescs[i].Type == D3D_SIT_CBUFFER)
+			else if (BoundResourceDesc.Type == D3D_SIT_CBUFFER)
 			{
-				//BoundResourceDescs[i].Space
 				OutMetadata->NumCBVs++;
 			}
+		}
+
+		ASSERT(OutMetadata->NumCBVs <= MAX_CBV_COUNT);
+
+		for (int32 CBVIndex = 0; CBVIndex < OutMetadata->NumCBVs; CBVIndex++)
+		{
+			auto* CBVReflection = ShaderReflection->GetConstantBufferByIndex(CBVIndex);
+			D3D12_SHADER_BUFFER_DESC CBVDesc = {};
+			CBVReflection->GetDesc(&CBVDesc);
+
+			OutMetadata->CBVSizes[CBVIndex] = CBVDesc.Size;
 		}
 
 		ShaderReflection->Release();

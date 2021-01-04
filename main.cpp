@@ -215,7 +215,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		return 0;
 	}
 
-	if (0)
+	//if (0)
 	{
 		bool bIsSingleThreaded = false;
 
@@ -228,12 +228,17 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			QueryPerformanceCounter(&PerfStart);
 			
 			const int32 TestCases = 1000;
+
+			D3DDrawingFuzzingPersistentState PersistState;
+			PersistState.ResourceMgr.D3DDevice = Device;
+			SetupFuzzPersistState(&PersistState, Device);
 			
 			// Single threaded
 			for (int32 i = 0; i < TestCases; i++)
 			{
 				ShaderFuzzingState Fuzzer;
 				Fuzzer.D3DDevice = Device;
+				Fuzzer.D3DPersist = &PersistState;
 			
 				SetSeedOnFuzzer(&Fuzzer, i);
 				//LOG("Doing round %d of fuzzing...", i);
@@ -255,10 +260,15 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
 			{
 				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
+					D3DDrawingFuzzingPersistentState PersistState;
+					PersistState.ResourceMgr.D3DDevice = Device;
+					SetupFuzzPersistState(&PersistState, Device);
+
 					for (int32 i = 0; i < 128 * 1000; i++)
 					{
 						ShaderFuzzingState Fuzzer;
 						Fuzzer.D3DDevice = Device;
+						Fuzzer.D3DPersist = &PersistState;
 		
 						uint64 InitialFuzzSeed = 0;
 		
