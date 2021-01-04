@@ -1296,7 +1296,7 @@ void FillOutPSOInputElements(std::vector<D3D12_INPUT_ELEMENT_DESC>* OutInputElem
 		D3D12_INPUT_ELEMENT_DESC InputElement = {};
 		InputElement.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
 		// TODO: Assumes every param is 16 bytes, which...fair assumption given above
-		InputElement.AlignedByteOffset = Var.ParamIdx * 16;
+		InputElement.AlignedByteOffset = 0;// Var.ParamIdx * 16;
 		InputElement.InputSlot = Var.ParamIdx;
 		InputElement.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 		InputElement.SemanticName = GetSemanticNameFromSemantic(Var.Semantic);
