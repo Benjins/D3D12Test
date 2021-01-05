@@ -1431,6 +1431,7 @@ void CreateInterstageVarsForVertexAndPixelShaders(ShaderFuzzingState* Fuzzer, Fu
 void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed)
 {
 	Fuzzer->RNGState.seed(Seed);
+	Fuzzer->InitialFuzzSeed = Seed;
 }
 
 void SetRandomBytes(ShaderFuzzingState* Fuzzer, void* Buffer, int32 Size)
@@ -1815,6 +1816,11 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(PSO, ValueSignaled);
 		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(RootSig, ValueSignaled);
+
+		for (auto* DescriptorHeap : SRVDescriptorHeaps)
+		{
+			Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(DescriptorHeap, ValueSignaled);
+		}
 
 #if defined(WITH_PIPELINE_STATS_QUERY)
 		// If we're synchronous

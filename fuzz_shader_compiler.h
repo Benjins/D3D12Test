@@ -22,6 +22,8 @@ struct ShaderFuzzingState {
 	ID3D12Device* D3DDevice = nullptr;
 	std::mt19937_64 RNGState;
 
+	uint64 InitialFuzzSeed = 0;
+
 	D3DDrawingFuzzingPersistentState* D3DPersist = nullptr;
 
 	// NOTE: It's inclusive

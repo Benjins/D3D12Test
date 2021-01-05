@@ -233,15 +233,22 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			PersistState.ResourceMgr.D3DDevice = Device;
 			SetupFuzzPersistState(&PersistState, Device);
 			
+			//uint64 DebugTestCases[] = {
+			//	14901767501596120,
+			//};
+
+
 			// Single threaded
+			//for (int32 i = 0; i < ARRAY_COUNTOF(DebugTestCases); i++)
 			for (int32 i = 0; i < TestCases; i++)
 			{
 				ShaderFuzzingState Fuzzer;
 				Fuzzer.D3DDevice = Device;
 				Fuzzer.D3DPersist = &PersistState;
 			
+				//LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
+				LOG("Doing round %d of fuzzing...", i);
 				SetSeedOnFuzzer(&Fuzzer, i);
-				//LOG("Doing round %d of fuzzing...", i);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
 			}
 			

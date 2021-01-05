@@ -202,6 +202,10 @@ struct ResourceLifecycleManager
 				{
 					((ID3D12PipelineState*)GPUObj.Obj)->Release();
 				}
+				else if (GPUObj.ObjType == OtherGPUObject::Type::DescriptorHeap)
+				{
+					((ID3D12DescriptorHeap*)GPUObj.Obj)->Release();
+				}
 				else
 				{
 					ASSERT(false && "sdfkbskfhj");
@@ -250,7 +254,8 @@ struct ResourceLifecycleManager
 		enum struct Type
 		{
 			RootSignature,
-			PipelineStateObject
+			PipelineStateObject,
+			DescriptorHeap
 		};
 
 		Type ObjType = Type::RootSignature;
@@ -274,6 +279,15 @@ struct ResourceLifecycleManager
 		OtherGPUObject GPUObject;
 		GPUObject.ObjType = OtherGPUObject::Type::PipelineStateObject;
 		GPUObject.Obj = PSO;
+		GPUObject.FenceValue = FenceValue;
+		OtherObjectsToDestroy.push_back(GPUObject);
+	}
+
+	void DeferredDelete(ID3D12DescriptorHeap* DescriptorHeap, uint64 FenceValue)
+	{
+		OtherGPUObject GPUObject;
+		GPUObject.ObjType = OtherGPUObject::Type::DescriptorHeap;
+		GPUObject.Obj = DescriptorHeap;
 		GPUObject.FenceValue = FenceValue;
 		OtherObjectsToDestroy.push_back(GPUObject);
 	}
