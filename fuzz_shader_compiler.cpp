@@ -27,6 +27,9 @@
 // struct ShaderResource;
 // struct ShaderInput;
 
+// Uncomment this to get pipeline statistics, esp. Pixel Shader invocations
+//#define WITH_PIPELINE_STATS_QUERY
+
 // Generate AST from 
 
 typedef unsigned char byte;
@@ -1747,7 +1750,38 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		
 		FlushResourceTransitions();
 
+#if defined(WITH_PIPELINE_STATS_QUERY)
+		ID3D12QueryHeap* QueryHeap = nullptr;
+
+		D3D12_QUERY_HEAP_DESC QueryHeapDesc = {};
+		QueryHeapDesc.Count = 1;
+		QueryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
+		Fuzzer->D3DDevice->CreateQueryHeap(&QueryHeapDesc, IID_PPV_ARGS(&QueryHeap));
+
+		ASSERT(QueryHeap != nullptr);
+
+		CommandList->BeginQuery(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+#endif
+
 		CommandList->DrawInstanced(VertexCount, 1, 0, 0);
+
+#if defined(WITH_PIPELINE_STATS_QUERY)
+		CommandList->EndQuery(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+
+		ID3D12Resource* DestBuffer = nullptr;
+		{
+			D3D12_HEAP_PROPERTIES HeapProps = {};
+			HeapProps.Type = D3D12_HEAP_TYPE_READBACK;
+			HeapProps.CreationNodeMask = 1;
+			HeapProps.VisibleNodeMask = 1;
+
+			D3D12_RESOURCE_DESC QueryBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS));
+
+			Fuzzer->D3DDevice->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &QueryBufferDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&DestBuffer));
+		}
+
+		CommandList->ResolveQueryData(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0, 1, DestBuffer, 0);
+#endif
 
 		CommandList->Close();
 
@@ -1782,7 +1816,28 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(PSO, ValueSignaled);
 		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(RootSig, ValueSignaled);
 
+#if defined(WITH_PIPELINE_STATS_QUERY)
+		// If we're synchronous
+		HANDLE hEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		Fuzzer->D3DPersist->ExecFence->SetEventOnCompletion(ValueSignaled, hEvent);
+		WaitForSingleObject(hEvent, INFINITE);
+		CloseHandle(hEvent);
+
+
+		D3D12_RANGE PipelineRange;
+		PipelineRange.Begin = 0;
+		PipelineRange.End = sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS);
+		D3D12_QUERY_DATA_PIPELINE_STATISTICS* StatisticsPtr = nullptr;
+		DestBuffer->Map(0, &PipelineRange, reinterpret_cast<void**>(&StatisticsPtr));
+
+		D3D12_QUERY_DATA_PIPELINE_STATISTICS PipelineStats = *StatisticsPtr;
+
+		LOG("IA Verts: %llu VS calls: %llu PS calls: %llu", PipelineStats.IAVertices, PipelineStats.VSInvocations, PipelineStats.PSInvocations);
+#endif
+
+
 		Fuzzer->D3DPersist->ExecFenceToSignal++;
+
 
 		//LOG("==============\nShader source (vertex):----------");
 		//OutputDebugStringA(VertShader.SourceCode.c_str());
