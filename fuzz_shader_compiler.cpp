@@ -1757,17 +1757,17 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		ID3D12CommandList* CommandLists[] = { CommandList };
 		Fuzzer->D3DPersist->CmdQueue->ExecuteCommandLists(1, CommandLists);
 
-		Fuzzer->D3DPersist->CmdQueue->Signal(Fuzzer->D3DPersist->ExecFence, Fuzzer->D3DPersist->ExecFenceToSignal);
+		uint64 ValueSignaled = Fuzzer->D3DPersist->ExecFenceToSignal;
+		Fuzzer->D3DPersist->CmdQueue->Signal(Fuzzer->D3DPersist->ExecFence, ValueSignaled);
 
 		Fuzzer->D3DPersist->CmdListMgr.CheckIfFenceFinished(Fuzzer->D3DPersist->ExecFence->GetCompletedValue());
 		Fuzzer->D3DPersist->ResourceMgr.CheckIfFenceFinished(Fuzzer->D3DPersist->ExecFence->GetCompletedValue());
 
 		Fuzzer->D3DPersist->CmdListMgr.NowDoneWithCommandList(CommandList);
 		Fuzzer->D3DPersist->CmdListMgr.NowDoneWithCommandAllocator(CommandAllocator);
-		Fuzzer->D3DPersist->CmdListMgr.OnFrameFenceSignaled(Fuzzer->D3DPersist->ExecFenceToSignal);
+		Fuzzer->D3DPersist->CmdListMgr.OnFrameFenceSignaled(ValueSignaled);
 
-		Fuzzer->D3DPersist->ResourceMgr.OnFrameFenceSignaled(Fuzzer->D3DPersist->ExecFenceToSignal);
-		Fuzzer->D3DPersist->ExecFenceToSignal++;
+		Fuzzer->D3DPersist->ResourceMgr.OnFrameFenceSignaled(ValueSignaled);
 
 		// Randomly destroy some resources
 
@@ -1775,6 +1775,11 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		// Should also figure out how to get rid of these when it's safe
 		// PSO->Release();
 		// RootSig->Release();
+
+		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(PSO, ValueSignaled);
+		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(RootSig, ValueSignaled);
+
+		Fuzzer->D3DPersist->ExecFenceToSignal++;
 
 		//LOG("==============\nShader source (vertex):----------");
 		//OutputDebugStringA(VertShader.SourceCode.c_str());

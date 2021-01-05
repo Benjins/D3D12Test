@@ -182,6 +182,31 @@ struct ResourceLifecycleManager
 				i--;
 			}
 		}
+
+		for (int32 i = 0; i < OtherObjectsToDestroy.size(); i++)
+		{
+			auto& GPUObj = OtherObjectsToDestroy[i];
+
+			if (GPUObj.FenceValue <= FrameFenceValue)
+			{
+				if (GPUObj.ObjType == OtherGPUObject::Type::RootSignature)
+				{
+					((ID3D12RootSignature*)GPUObj.Obj)->Release();
+				}
+				else if (GPUObj.ObjType == OtherGPUObject::Type::PipelineStateObject)
+				{
+					((ID3D12PipelineState*)GPUObj.Obj)->Release();
+				}
+				else
+				{
+					ASSERT(false && "sdfkbskfhj");
+				}
+
+				OtherObjectsToDestroy[i] = OtherObjectsToDestroy.back();
+				OtherObjectsToDestroy.pop_back();
+				i--;
+			}
+		}
 	}
 
 	void PerformResourceTransitions(const std::vector<ResourceToTransition>& ResourceTransitions, ID3D12GraphicsCommandList* CommandList)
@@ -211,6 +236,40 @@ struct ResourceLifecycleManager
 		
 		CommandList->ResourceBarrier(Barriers.size(), Barriers.data());
 	}
+
+	struct OtherGPUObject
+	{
+		enum struct Type
+		{
+			RootSignature,
+			PipelineStateObject
+		};
+
+		Type ObjType = Type::RootSignature;
+		void* Obj = nullptr;
+		uint64 FenceValue = 0;
+	};
+
+	std::vector<OtherGPUObject> OtherObjectsToDestroy;
+
+	void DeferredDelete(ID3D12RootSignature* RootSig, uint64 FenceValue)
+	{
+		OtherGPUObject GPUObject;
+		GPUObject.ObjType = OtherGPUObject::Type::RootSignature;
+		GPUObject.Obj = RootSig;
+		GPUObject.FenceValue = FenceValue;
+		OtherObjectsToDestroy.push_back(GPUObject);
+	}
+
+	void DeferredDelete(ID3D12PipelineState* PSO, uint64 FenceValue)
+	{
+		OtherGPUObject GPUObject;
+		GPUObject.ObjType = OtherGPUObject::Type::PipelineStateObject;
+		GPUObject.Obj = PSO;
+		GPUObject.FenceValue = FenceValue;
+		OtherObjectsToDestroy.push_back(GPUObject);
+	}
+
 
 	// Request resource state change...might need to be atomic w.r.t. the command list submit
 	// Ugh....but that would kill perf
