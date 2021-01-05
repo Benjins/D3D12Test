@@ -1617,6 +1617,9 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 			TextureUploadResource->Unmap(0, nullptr);
 
+			TransitionResource(ResID, D3D12_RESOURCE_STATE_COPY_DEST);
+			FlushResourceTransitions();
+
 			// TODO: Resource barriers before and after
 			CopyTextureResource(CommandList, TextureUploadResource, TextureResource, TextureWidth, TextureHeight, TextureWidth * bpp);
 

@@ -12,6 +12,10 @@ inline bool CompareD3D12ResourceDesc(const D3D12_RESOURCE_DESC& a, const D3D12_R
 	{
 		return (a.Alignment == b.Alignment) && (a.Flags == b.Flags) && (a.Width == b.Width) && (a.Format == b.Format);
 	}
+	else if (a.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D && a.Dimension == b.Dimension)
+	{
+		return (a.Alignment == b.Alignment) && (a.Flags == b.Flags) && (a.Width == b.Width) && (a.Height == b.Height) && (a.Layout == b.Layout) && (a.Format == b.Format);
+	}
 	else
 	{
 		return false;
@@ -74,6 +78,7 @@ struct ResourceLifecycleManager
 
 		Resource Res;
 		Res.Ptr = *OutRes;
+		Res.Desc = Desc;
 		Res.CmdListUseCount = 1;
 		Res.CurrentState = InitialState;
 		Res.ResourceID = CurrentResourceID;
@@ -234,7 +239,10 @@ struct ResourceLifecycleManager
 			}
 		}
 		
-		CommandList->ResourceBarrier(Barriers.size(), Barriers.data());
+		if (!Barriers.empty())
+		{
+			CommandList->ResourceBarrier(Barriers.size(), Barriers.data());
+		}
 	}
 
 	struct OtherGPUObject
