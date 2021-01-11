@@ -601,8 +601,40 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 				OutShaderAST->VariablesInScope.emplace_back();
 				auto* NewStmt = GenerateFuzzingShaderAssignment(Fuzzer, OutShaderAST);
 				OutShaderAST->VariablesInScope.pop_back();
+
 				NewStmt->IsPredeclared = true;
 				NewStmt->VariableName = std::string("result.") + Var.VarName;
+
+				// If we want to ensure better pixel coverage
+				if (Fuzzer->Config->EnsureBetterPixelCoverage != 0 && Var.Semantic == ShaderSemantic::SV_POSITION)
+				{
+					auto PositionIAVar = OutShaderAST->IAVars[0];
+					// NOTE: We assume the 0th IA var is position. We could do a search, since we know it's here, but for now w/e
+					ASSERT(PositionIAVar.Semantic == ShaderSemantic::POSITION);
+
+					auto* OuterAdd = OutShaderAST->AllocateNode<FuzzShaderBinaryOperator>();
+					OuterAdd->Op = FuzzShaderBinaryOperator::Operator::Add;
+
+					auto* IAVarRead = OutShaderAST->AllocateNode<FuzzShaderReadVariable>();
+					IAVarRead->VariableName = std::string("input.") + PositionIAVar.VarName;
+					OuterAdd->LHS = IAVarRead;
+
+					auto* InnerMul = OutShaderAST->AllocateNode<FuzzShaderBinaryOperator>();
+					InnerMul->Op = FuzzShaderBinaryOperator::Operator::Multiply;
+					InnerMul->LHS = NewStmt->Value;
+
+					auto* SmallScale = OutShaderAST->AllocateNode<FuzzShaderLiteral>();
+					SmallScale->Values[0] = 0.00001f;
+					SmallScale->Values[1] = 0.00001f;
+					SmallScale->Values[2] = 1.0f;
+					SmallScale->Values[3] = 1.0f;
+					InnerMul->RHS = SmallScale;
+
+					OuterAdd->RHS = InnerMul;
+
+					NewStmt->Value = OuterAdd;
+				}
+
 				RootNode->Statements.push_back(NewStmt);
 			}
 		}
@@ -1463,6 +1495,10 @@ void CopyTextureResource(ID3D12GraphicsCommandList* CommandList, ID3D12Resource*
 	CommandList->CopyTextureRegion(&CopyLocDst, 0, 0, 0, &CopyLocSrc, nullptr);
 }
 
+
+uint64 TotalPSCalls = 0;
+uint64 TotalFuzzCases = 0;
+
 void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 {
 	for (int32_t Iteration = 0; Iteration < NumIterations; Iteration++)
@@ -1694,7 +1730,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 		// Set resources in cmd list and IA vertex stuff
 
-		const int32 VertexCount = Fuzzer->GetIntInRange(10, 50);
+		const int32 VertexCount = Fuzzer->GetIntInRange(30, 100);
 
 		for (int32 IAParamIdx = 0; IAParamIdx < VertShader.ShaderMeta.NumParams; IAParamIdx++)
 		{
@@ -1792,6 +1828,15 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		}
 
 
+		for (auto ResID : AllResourcesInUse)
+		{
+			if (Fuzzer->GetFloat01() < 0.1f)
+			{
+				Fuzzer->D3DPersist->ResourceMgr.RequestResourceDestroyed(ResID);
+			}
+		}
+
+
 		ID3D12CommandList* CommandLists[] = { CommandList };
 		Fuzzer->D3DPersist->CmdQueue->ExecuteCommandLists(1, CommandLists);
 
@@ -1839,6 +1884,13 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		D3D12_QUERY_DATA_PIPELINE_STATISTICS PipelineStats = *StatisticsPtr;
 
 		LOG("IA Verts: %llu VS calls: %llu PS calls: %llu", PipelineStats.IAVertices, PipelineStats.VSInvocations, PipelineStats.PSInvocations);
+
+		//uint64 PrevTotalPSCalls = InterlockedAdd64((volatile LONG64*)&TotalPSCalls, PipelineStats.PSInvocations);
+		//uint64 PrevTotalFuzzCases = InterlockedAdd64((volatile LONG64*)&TotalFuzzCases, 1);
+		//
+		//double PSCallsPerCase = PrevTotalPSCalls;
+		//PSCallsPerCase /= PrevTotalFuzzCases;
+		//LOG("Avg PS calls per fuzz case: %3.2f", PSCallsPerCase);
 #endif
 
 

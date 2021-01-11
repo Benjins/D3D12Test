@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <stdint.h>
+#include "basics.h"
 
 #include <random>
 
@@ -18,6 +18,11 @@ struct D3DDrawingFuzzingPersistentState
 	int32 ExecFenceToSignal = 0;
 };
 
+struct ShaderFuzzConfig
+{
+	uint32 EnsureBetterPixelCoverage = 0;
+};
+
 struct ShaderFuzzingState {
 	ID3D12Device* D3DDevice = nullptr;
 	std::mt19937_64 RNGState;
@@ -25,6 +30,8 @@ struct ShaderFuzzingState {
 	uint64 InitialFuzzSeed = 0;
 
 	D3DDrawingFuzzingPersistentState* D3DPersist = nullptr;
+
+	ShaderFuzzConfig* Config = nullptr;
 
 	// NOTE: It's inclusive
 	int GetIntInRange(int min, int max)

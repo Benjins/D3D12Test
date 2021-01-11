@@ -232,6 +232,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;
 			SetupFuzzPersistState(&PersistState, Device);
+
+			ShaderFuzzConfig ShaderConfig;
 			
 			//uint64 DebugTestCases[] = {
 			//	14901767501596120,
@@ -245,6 +247,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 				ShaderFuzzingState Fuzzer;
 				Fuzzer.D3DDevice = Device;
 				Fuzzer.D3DPersist = &PersistState;
+				Fuzzer.Config = &ShaderConfig;
 			
 				//LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
 				LOG("Doing round %d of fuzzing...", i);
@@ -263,10 +266,13 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		{
 			const int32 ThreadCount = 4;
 			std::vector<std::thread> FuzzThreads;
+
+			ShaderFuzzConfig ShaderConfig;
+			ShaderConfig.EnsureBetterPixelCoverage = 1;
 		
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
 			{
-				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx]() {
+				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, ConfigPtr = &ShaderConfig]() {
 					D3DDrawingFuzzingPersistentState PersistState;
 					PersistState.ResourceMgr.D3DDevice = Device;
 					SetupFuzzPersistState(&PersistState, Device);
@@ -276,6 +282,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 						ShaderFuzzingState Fuzzer;
 						Fuzzer.D3DDevice = Device;
 						Fuzzer.D3DPersist = &PersistState;
+						Fuzzer.Config = ConfigPtr;
 		
 						uint64 InitialFuzzSeed = 0;
 		
