@@ -1158,7 +1158,6 @@ static D3D12_RASTERIZER_DESC GetFuzzRasterizerDesc(ShaderFuzzingState* Fuzzer)
 	Desc.ConservativeRaster = ConservativeRasterModes[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(ConservativeRasterModes) - 1)];
 
 	// D3D12 ERROR: ID3D12Device::CreateRasterizerState: FillMode must be D3D12_FILL_MODE_SOLID when ConservativeRaster is D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON: FillMode = D3D12_FILL_MODE_WIREFRAME, ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON. [ STATE_CREATION ERROR #95: CREATERASTERIZERSTATE_INVALIDFILLMODE]
-
 	if (Desc.ConservativeRaster == D3D12_CONSERVATIVE_RASTERIZATION_MODE_ON)
 	{
 		Desc.FillMode = D3D12_FILL_MODE_SOLID;
@@ -1391,6 +1390,8 @@ void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* Ver
 	ID3D12PipelineState* PSO = nullptr;
 	Fuzzer->D3DDevice->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO));
 
+	ASSERT(PSO != nullptr);
+
 	*OutRootSig = RootSig;
 	*OutPSO = PSO;
 
@@ -1540,6 +1541,8 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		RootSigResourceDesc RootSigDesc;
 
 		VerifyGraphicsPSOCompilation(Fuzzer, &VertShader, &PixelShader, &RootSig, &PSO, &RootSigDesc);
+
+		ASSERT(PSO != nullptr);
 
 		ID3D12CommandAllocator* CommandAllocator = Fuzzer->D3DPersist->CmdListMgr.GetOpenCommandAllocator();
 		if (CommandAllocator == nullptr)

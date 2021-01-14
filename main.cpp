@@ -149,7 +149,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 1;
+	int ChosenAdapterIndex = 2;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -234,19 +234,25 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			SetupFuzzPersistState(&PersistState, Device);
 
 			ShaderFuzzConfig ShaderConfig;
+			ShaderConfig.EnsureBetterPixelCoverage = 1;
 			
 			uint64 DebugTestCases[] = {
-				14908923361117291,
-				//14908923367228386,
-				14908923369325538,
-				14908923368276962,
-				//14908923369325539,
-				//14908923367228387,
-				//14908923369325540,
-				//14908923368276963,
-				//14908923370374115,
-				//14908923367228388,
-				//14908923378582364,
+				// WARP
+				14908978668537592,
+				14908978668537593
+
+				// Intel
+				// 14908923361117291,
+				// 14908923367228386,
+				// 14908923369325538,
+				// 14908923368276962,
+				// 14908923369325539,
+				// 14908923367228387,
+				// 14908923369325540,
+				// 14908923368276963,
+				// 14908923370374115,
+				// 14908923367228388,
+				// 14908923378582364,
 			};
 
 
@@ -259,8 +265,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 				Fuzzer.D3DPersist = &PersistState;
 				Fuzzer.Config = &ShaderConfig;
 			
-				//LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
-				LOG("Doing round %d of fuzzing...", i);
+				LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
+				//LOG("Doing round %d of fuzzing...", i);
 				SetSeedOnFuzzer(&Fuzzer, DebugTestCases[i]);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
 			}
@@ -274,18 +280,23 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		}
 		else
 		{
-			const int32 ThreadCount = 4;
+			const int32 ThreadCount = 1;
 			std::vector<std::thread> FuzzThreads;
 
 			ShaderFuzzConfig ShaderConfig;
 			ShaderConfig.EnsureBetterPixelCoverage = 1;
 		
+			uint64 StartingTime = 1610593469;// time(NULL);
+			LOG("Starting time: %llu", StartingTime);
+
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
 			{
-				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, ConfigPtr = &ShaderConfig]() {
+				FuzzThreads.emplace_back([Device = Device, TIdx = 1, ConfigPtr = &ShaderConfig, StartingTime = StartingTime]() {
 					D3DDrawingFuzzingPersistentState PersistState;
 					PersistState.ResourceMgr.D3DDevice = Device;
 					SetupFuzzPersistState(&PersistState, Device);
+
+					//TIdx = 0;
 
 					for (int32 i = 0; i < 128 * 1000; i++)
 					{
@@ -297,7 +308,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 						uint64 InitialFuzzSeed = 0;
 		
 						// If we want to have different fuzzing each process run. Good once a fuzzer is established.
-						InitialFuzzSeed += time(NULL) * 0x8D3F77LLU;
+						InitialFuzzSeed += StartingTime * 0x8D3F77LLU;
 		
 						InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
 						InitialFuzzSeed += i;
