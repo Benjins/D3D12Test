@@ -1164,6 +1164,14 @@ static D3D12_RASTERIZER_DESC GetFuzzRasterizerDesc(ShaderFuzzingState* Fuzzer)
 		Desc.FillMode = D3D12_FILL_MODE_SOLID;
 	}
 
+	// If we're trying to get good pixel shader coverage, then make sure we do solid not wireframe,
+	// and turn off culling
+	if (Fuzzer->Config->EnsureBetterPixelCoverage)
+	{
+		Desc.FillMode = D3D12_FILL_MODE_SOLID;
+		Desc.CullMode = D3D12_CULL_MODE_NONE;
+	}
+
 	return Desc;
 }
 
