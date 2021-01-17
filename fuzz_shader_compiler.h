@@ -22,10 +22,14 @@ struct D3DDrawingFuzzingPersistentState
 
 struct ShaderFuzzConfig
 {
-	uint32 EnsureBetterPixelCoverage = 0;
+	// Make the vertex shader output more sensible position data
+	byte EnsureBetterPixelCoverage = 0;
 
 	// Can trip a bug in WARP (see repro case 1)
-	uint32 AllowConservativeRasterization = 0;
+	byte AllowConservativeRasterization = 0;
+
+	// CBVs less likely to contain garbage, have actual floats rather than random bytes
+	byte CBVUploadRandomFloatData = 1;
 };
 
 struct ShaderFuzzingState {

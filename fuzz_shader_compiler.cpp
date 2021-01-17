@@ -1733,7 +1733,18 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			HRESULT hr = D3DResource->Map(0, &readRange, &pBufferData);
 			ASSERT(SUCCEEDED(hr));
 
-			SetRandomBytes(Fuzzer, pBufferData, CBVDesc.BufferSize);
+			if (Fuzzer->Config->CBVUploadRandomFloatData != 0)
+			{
+				float* pFloatData = (float*)pBufferData;
+				for (int32 i = 0; i < CBVDesc.BufferSize / 4; i++)
+				{
+					pFloatData[i] = Fuzzer->GetFloatInRange(-100.0f, 100.0f);
+				}
+			}
+			else
+			{
+				SetRandomBytes(Fuzzer, pBufferData, CBVDesc.BufferSize);
+			}
 
 			D3DResource->Unmap(0, nullptr);
 
