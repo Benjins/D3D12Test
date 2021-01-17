@@ -256,7 +256,8 @@ int main(int argc, char** argv) {
 	}
 
 	ID3D12Device* Device = nullptr;
-	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
+	hr = SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device)));
+	ASSERT(hr);
 
 
 	ID3DBlob* VSByteCode = nullptr;
@@ -328,15 +329,17 @@ int main(int argc, char** argv) {
 
 	D3D12_COMMAND_QUEUE_DESC CmdQueueDesc = {};
 	CmdQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-	ASSERT(SUCCEEDED(Device->CreateCommandQueue(&CmdQueueDesc, IID_PPV_ARGS(&CommandQueue))));
+	hr = Device->CreateCommandQueue(&CmdQueueDesc, IID_PPV_ARGS(&CommandQueue));
+	ASSERT(SUCCEEDED(hr));
 
 	{
-
 		ID3D12CommandAllocator* CommandAllocator = nullptr;
-		ASSERT(SUCCEEDED(hr = Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator))));
+		hr = Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator));
+		ASSERT(SUCCEEDED(hr));
 
 		ID3D12GraphicsCommandList* CommandList = nullptr;
-		ASSERT(SUCCEEDED(Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
+		hr = Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator, 0, IID_PPV_ARGS(&CommandList));
+		ASSERT(SUCCEEDED(hr));
 
 		const int32 RTWidth = 128;
 		const int32 RTHeight = 128;
