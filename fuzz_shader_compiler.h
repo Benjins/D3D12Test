@@ -15,7 +15,9 @@ struct D3DDrawingFuzzingPersistentState
 	CommandListReclaimer CmdListMgr;
 	ID3D12CommandQueue* CmdQueue = nullptr;
 	ID3D12Fence* ExecFence = nullptr;
-	int32 ExecFenceToSignal = 0;
+
+	// We have to start signaling with 1, since the initial value of the fence is 0
+	int32 ExecFenceToSignal = 1;
 };
 
 struct ShaderFuzzConfig
