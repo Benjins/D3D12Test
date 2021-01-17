@@ -149,7 +149,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 2;
+	int ChosenAdapterIndex = 0;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -217,7 +217,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
-		bool bIsSingleThreaded = true;
+		bool bIsSingleThreaded = false;
 
 		if (bIsSingleThreaded)
 		{
@@ -235,7 +235,11 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 			ShaderFuzzConfig ShaderConfig;
 			ShaderConfig.EnsureBetterPixelCoverage = 1;
-			ShaderConfig.AllowConservativeRasterization = 0;
+			{
+				DXGI_ADAPTER_DESC Desc = {};
+				ChosenAdapter->GetDesc(&Desc);
+				ShaderConfig.AllowConservativeRasterization = (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
+			}
 			
 			uint64 DebugTestCases[] = {
 				// Intel
@@ -283,14 +287,18 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 			ShaderFuzzConfig ShaderConfig;
 			ShaderConfig.EnsureBetterPixelCoverage = 1;
-			ShaderConfig.AllowConservativeRasterization = 0;
+			{
+				DXGI_ADAPTER_DESC Desc = {};
+				ChosenAdapter->GetDesc(&Desc);
+				ShaderConfig.AllowConservativeRasterization = (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
+			}
 		
 			uint64 StartingTime = time(NULL);
 			LOG("Starting time: %llu", StartingTime);
 
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
 			{
-				FuzzThreads.emplace_back([Device = Device, TIdx = 1, ConfigPtr = &ShaderConfig, StartingTime = StartingTime]() {
+				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, ConfigPtr = &ShaderConfig, StartingTime = StartingTime]() {
 					D3DDrawingFuzzingPersistentState PersistState;
 					PersistState.ResourceMgr.D3DDevice = Device;
 					SetupFuzzPersistState(&PersistState, Device);
