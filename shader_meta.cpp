@@ -20,7 +20,7 @@ ShaderSemantic GetSemanticFromSemanticName(const char* Name)
 {
 	for (int32 i = 0; i < (int32)ShaderSemantic::Count; i++)
 	{
-		if (strcmp(Name, ShaderSemanticNames[i]))
+		if (strcmp(Name, ShaderSemanticNames[i]) == 0)
 		{
 			return (ShaderSemantic)i;
 		}
