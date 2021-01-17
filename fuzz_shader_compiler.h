@@ -21,6 +21,9 @@ struct D3DDrawingFuzzingPersistentState
 struct ShaderFuzzConfig
 {
 	uint32 EnsureBetterPixelCoverage = 0;
+
+	// Can trip a bug in WARP (see repro case 1)
+	uint32 AllowConservativeRasterization = 0;
 };
 
 struct ShaderFuzzingState {

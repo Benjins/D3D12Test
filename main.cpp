@@ -235,6 +235,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 			ShaderFuzzConfig ShaderConfig;
 			ShaderConfig.EnsureBetterPixelCoverage = 1;
+			ShaderConfig.AllowConservativeRasterization = 0;
 			
 			uint64 DebugTestCases[] = {
 				// Intel
@@ -282,6 +283,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 			ShaderFuzzConfig ShaderConfig;
 			ShaderConfig.EnsureBetterPixelCoverage = 1;
+			ShaderConfig.AllowConservativeRasterization = 0;
 		
 			uint64 StartingTime = time(NULL);
 			LOG("Starting time: %llu", StartingTime);
