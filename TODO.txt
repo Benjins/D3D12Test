@@ -10,6 +10,7 @@
  - generate compute shaders
  X actually run shaders, possibly will require some constraints on them to make sure pixel shader would actually run
  - input textures of different formats (and maybe RTVs of other formats as well?)
+ - multiple render targets
  
  
 Follow-ups:

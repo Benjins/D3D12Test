@@ -138,9 +138,9 @@ static bool shouldQuit = false;
 
 int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showCommand) {
 
-	ID3D12Debug1* D3D12DebugLayer = nullptr;
-	D3D12GetDebugInterface(IID_PPV_ARGS(&D3D12DebugLayer));
-	D3D12DebugLayer->EnableDebugLayer();
+	//ID3D12Debug1* D3D12DebugLayer = nullptr;
+	//D3D12GetDebugInterface(IID_PPV_ARGS(&D3D12DebugLayer));
+	//D3D12DebugLayer->EnableDebugLayer();
 	//D3D12DebugLayer->SetEnableGPUBasedValidation(true);
 	//D3D12DebugLayer->SetEnableSynchronizedCommandQueueValidation(true);
 
@@ -149,7 +149,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 0;
+	int ChosenAdapterIndex = 2;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -221,7 +221,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
-		ShaderConfig.CBVUploadRandomFloatData = 1;
+		ShaderConfig.CBVUploadRandomFloatData = 0;
 		{
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);
@@ -286,7 +286,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			const int32 ThreadCount = 6;
 			std::vector<std::thread> FuzzThreads;
 
-			uint64 StartingTime = time(NULL);
+			uint64 StartingTime = 1610934703LLU;// time(NULL);
 			LOG("Starting time: %llu", StartingTime);
 
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
