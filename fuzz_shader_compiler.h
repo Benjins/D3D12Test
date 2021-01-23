@@ -4,6 +4,7 @@
 #include "basics.h"
 
 #include <random>
+#include <mutex>
 
 #include "d3d_resource_mgr.h"
 
@@ -15,6 +16,10 @@ struct D3DDrawingFuzzingPersistentState
 	CommandListReclaimer CmdListMgr;
 	ID3D12CommandQueue* CmdQueue = nullptr;
 	ID3D12Fence* ExecFence = nullptr;
+
+	// Debugging tool if we find data races, so we can avoid them in the meantime
+	// Must be shared across threads, so...yeah
+	std::mutex* ExecuteCommandListMutex = nullptr;
 
 	// We have to start signaling with 1, since the initial value of the fence is 0
 	int32 ExecFenceToSignal = 1;
@@ -30,6 +35,9 @@ struct ShaderFuzzConfig
 
 	// CBVs less likely to contain garbage, have actual floats rather than random bytes
 	byte CBVUploadRandomFloatData = 1;
+
+	// If there are data races in command list execution, this can avoid them while still allowing some threading
+	byte LockMutexAroundExecCmdList = 0;
 };
 
 struct ShaderFuzzingState {

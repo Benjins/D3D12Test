@@ -1865,8 +1865,18 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 
 		ID3D12CommandList* CommandLists[] = { CommandList };
-		Fuzzer->D3DPersist->CmdQueue->ExecuteCommandLists(1, CommandLists);
+		if (Fuzzer->Config->LockMutexAroundExecCmdList != 0)
+		{
+			ASSERT(Fuzzer->D3DPersist->ExecuteCommandListMutex != nullptr);
 
+			std::lock_guard<std::mutex> Lock(*Fuzzer->D3DPersist->ExecuteCommandListMutex);
+
+			Fuzzer->D3DPersist->CmdQueue->ExecuteCommandLists(1, CommandLists);
+		}
+		else
+		{
+			Fuzzer->D3DPersist->CmdQueue->ExecuteCommandLists(1, CommandLists);
+		}
 		uint64 ValueSignaled = Fuzzer->D3DPersist->ExecFenceToSignal;
 		Fuzzer->D3DPersist->CmdQueue->Signal(Fuzzer->D3DPersist->ExecFence, ValueSignaled);
 

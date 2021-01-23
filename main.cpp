@@ -226,6 +226,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);
 			ShaderConfig.AllowConservativeRasterization = (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
+			ShaderConfig.LockMutexAroundExecCmdList = (Desc.VendorId == 0x1414 && Desc.DeviceId == 0x8C && !bIsSingleThreaded);
 		}
 
 		if (bIsSingleThreaded)
@@ -286,14 +287,17 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			const int32 ThreadCount = 6;
 			std::vector<std::thread> FuzzThreads;
 
+			std::mutex DebugMutex;
+
 			uint64 StartingTime = 1610934703LLU;// time(NULL);
 			LOG("Starting time: %llu", StartingTime);
 
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
 			{
-				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, ConfigPtr = &ShaderConfig, StartingTime = StartingTime]() {
+				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, ConfigPtr = &ShaderConfig, StartingTime = StartingTime, MutexPtr = &DebugMutex]() {
 					D3DDrawingFuzzingPersistentState PersistState;
 					PersistState.ResourceMgr.D3DDevice = Device;
+					PersistState.ExecuteCommandListMutex = MutexPtr;
 					SetupFuzzPersistState(&PersistState, Device);
 
 					for (int32 i = 0; i < 128 * 1000; i++)
