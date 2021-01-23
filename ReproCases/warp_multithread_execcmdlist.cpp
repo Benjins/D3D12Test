@@ -1,6 +1,7 @@
 //
 // Repro case for multi-threaded WARP access violation
 // Does not repro every time, but I see it more than half the time
+// Tested on my machine that is running Windows 10 Version 20H2, OS Build 19042.746
 // If multiple threads call ExecuteCommandLists() at the same time, then later on an access violation occurs inside WARP
 // This occurs even if the calls are to different command queues
 // It can be mitigated by using a mutex to prevent simultaneous calls to ExecuteCommandLists
