@@ -1,5 +1,6 @@
 //
 // Repro case for multi-threaded WARP access violation
+// Does not repro every time, but I see it more than half the time
 // If multiple threads call ExecuteCommandLists() at the same time, then later on an access violation occurs inside WARP
 // This occurs even if the calls are to different command queues
 // It can be mitigated by using a mutex to prevent simultaneous calls to ExecuteCommandLists
@@ -416,6 +417,20 @@ int main(int argc, char** argv) {
 				vtbView.StrideInBytes = 16;
 			}
 
+			D3D12_VIEWPORT Viewport = {};
+			Viewport.MinDepth = 0;
+			Viewport.MaxDepth = 1;
+			Viewport.TopLeftX = 0;
+			Viewport.TopLeftY = 0;
+			Viewport.Width = RTWidth;
+			Viewport.Height = RTHeight;
+
+			D3D12_RECT ScissorRect = {};
+			ScissorRect.left = 0;
+			ScissorRect.right = RTWidth;
+			ScissorRect.top = 0;
+			ScissorRect.bottom = RTHeight;
+
 			// We need to randomise some aspects of the blend state for PSO creation,
 			// however the initial seed isn't too important (and can be the same across threads)
 			std::mt19937_64 RNGState;
@@ -435,22 +450,9 @@ int main(int argc, char** argv) {
 			PSODesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
 			PSODesc.SampleDesc.Count = 1;
 
-			D3D12_VIEWPORT Viewport = {};
-			Viewport.MinDepth = 0;
-			Viewport.MaxDepth = 1;
-			Viewport.TopLeftX = 0;
-			Viewport.TopLeftY = 0;
-			Viewport.Width = RTWidth;
-			Viewport.Height = RTHeight;
-
-			D3D12_RECT ScissorRect = {};
-			ScissorRect.left = 0;
-			ScissorRect.right = RTWidth;
-			ScissorRect.top = 0;
-			ScissorRect.bottom = RTHeight;
-
 			for (int32 i = 0; i < NumIterations; i++)
 			{
+				// Make a slightly different PSO. For some reason, using the same PSO description does not repro nearly as much
 				PSODesc.BlendState = GetDefaultBlendStateDesc(&RNGState);
 
 				ID3D12PipelineState* PSO = nullptr;
