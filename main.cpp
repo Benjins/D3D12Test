@@ -149,7 +149,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 2;
+	int ChosenAdapterIndex = 1;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -217,7 +217,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
-		bool bIsSingleThreaded = false;
+		bool bIsSingleThreaded = true;
 
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
@@ -247,31 +247,23 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 				// Intel
 				14908923361117291,
 				14908923367228386,
-				14908923369325538,
-				14908923368276962,
-				14908923369325539,
-				14908923367228387,
-				14908923369325540,
-				14908923368276963,
-				14908923370374115,
-				14908923367228388,
-				14908923378582364,
+				14908923369325538
 			};
 
 
 			// Single threaded
-			//for (int32 i = 0; i < ARRAY_COUNTOF(DebugTestCases); i++)
-			for (int32 i = 0; i < TestCases; i++)
+			for (int32 i = 0; i < ARRAY_COUNTOF(DebugTestCases); i++)
+			//for (int32 i = 0; i < TestCases; i++)
 			{
 				ShaderFuzzingState Fuzzer;
 				Fuzzer.D3DDevice = Device;
 				Fuzzer.D3DPersist = &PersistState;
 				Fuzzer.Config = &ShaderConfig;
 			
-				//LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
-				//SetSeedOnFuzzer(&Fuzzer, DebugTestCases[i]);
-				LOG("Doing round %d of fuzzing...", i);
-				SetSeedOnFuzzer(&Fuzzer, i);
+				LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
+				SetSeedOnFuzzer(&Fuzzer, DebugTestCases[i]);
+				//LOG("Doing round %d of fuzzing...", i);
+				//SetSeedOnFuzzer(&Fuzzer, i);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
 			}
 			
