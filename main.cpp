@@ -289,7 +289,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 			std::mutex DebugMutex;
 
-			uint64 StartingTime = 1610934703LLU;// time(NULL);
+			uint64 StartingTime = time(NULL);
 			LOG("Starting time: %llu", StartingTime);
 
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
