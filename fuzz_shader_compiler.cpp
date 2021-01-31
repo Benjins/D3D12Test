@@ -1482,16 +1482,6 @@ void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed)
 	Fuzzer->InitialFuzzSeed = Seed;
 }
 
-void SetRandomBytes(ShaderFuzzingState* Fuzzer, void* Buffer, int32 Size)
-{
-	byte* ByteBuffer = (byte*)Buffer;
-
-	for (int32 i = 0; i < Size; i++)
-	{
-		ByteBuffer[i] = (byte)Fuzzer->GetIntInRange(0, 255);
-	}
-}
-
 void CopyTextureResource(ID3D12GraphicsCommandList* CommandList, ID3D12Resource* TextureUploadResource, ID3D12Resource* TextureResource, int32 Width, int32 Height, int32 Pitch)
 {
 	D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};

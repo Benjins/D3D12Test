@@ -11,6 +11,7 @@
 
 #include <assert.h>
 
+#include <d3d11.h>
 #include <d3d12.h>
 
 #include <d3dcompiler.h>
@@ -23,10 +24,12 @@
 
 #include "d3d12_ext.h"
 
+#include "fuzz_d3d11_video.h"
 #include "fuzz_shader_compiler.h"
 #include "fuzz_dxbc.h"
 #include "d3d_resource_mgr.h"
 
+#pragma comment(lib, "D3D11.lib")
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -187,6 +190,37 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		OutputDebugStringW(ChosenAdapterDesc.Description);
 		OutputDebugStringW(L"\n");
 	}
+
+
+	//if (0)
+	{
+		ID3D11Device* Device = nullptr;
+		ID3D11DeviceContext* DeviceContext = nullptr;
+		UINT Flags = 0;
+		Flags |= D3D11_CREATE_DEVICE_DEBUG;
+		HRESULT hr = D3D11CreateDevice(ChosenAdapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, Flags, NULL, 0, D3D11_SDK_VERSION, &Device, NULL, &DeviceContext);
+
+		ASSERT(SUCCEEDED(hr));
+
+		ID3D11VideoDevice* VideoDevice = nullptr;
+		hr = Device->QueryInterface(IID_PPV_ARGS(&VideoDevice));
+		ASSERT(SUCCEEDED(hr));
+
+		ID3D11VideoContext* VideoContext = nullptr;
+		hr = DeviceContext->QueryInterface(IID_PPV_ARGS(&VideoContext));
+		ASSERT(SUCCEEDED(hr));
+
+		D3D11VideoFuzzingState Fuzzer;
+		Fuzzer.D3DDevice = Device;
+		Fuzzer.VideoDevice = VideoDevice;
+		Fuzzer.VideoContext = VideoContext;
+
+		SetSeedOnVideoFuzzer(&Fuzzer, 0);
+		DoIterationsWithVideoFuzzer(&Fuzzer, 1);
+
+		return 0;
+	}
+
 
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));

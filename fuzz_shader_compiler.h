@@ -3,7 +3,8 @@
 
 #include "basics.h"
 
-#include <random>
+#include "fuzz_basic.h"
+
 #include <mutex>
 
 #include "d3d_resource_mgr.h"
@@ -46,35 +47,12 @@ struct ShaderFuzzConfig
 	float ResourceDeletionChance = 0.1f;
 };
 
-struct ShaderFuzzingState {
+struct ShaderFuzzingState : FuzzBasicState {
 	ID3D12Device* D3DDevice = nullptr;
-	std::mt19937_64 RNGState;
-
-	uint64 InitialFuzzSeed = 0;
 
 	D3DDrawingFuzzingPersistentState* D3DPersist = nullptr;
 
 	ShaderFuzzConfig* Config = nullptr;
-
-	// NOTE: It's inclusive
-	int GetIntInRange(int min, int max)
-	{
-		std::uniform_int_distribution<int> Dist(min, max);
-
-		return Dist(RNGState);
-	}
-
-	float GetFloatInRange(float min, float max)
-	{
-		std::uniform_real_distribution<float> Dist(min, max);
-
-		return Dist(RNGState);
-	}
-
-	float GetFloat01()
-	{
-		return GetFloatInRange(0.0f, 1.0f);
-	}
 };
 
 
