@@ -38,6 +38,12 @@ struct ShaderFuzzConfig
 
 	// If there are data races in command list execution, this can avoid them while still allowing some threading
 	byte LockMutexAroundExecCmdList = 0;
+
+	// 0 = do not delete resources (though they will be re-used once safe)
+	// 1 = delete all resources once used, do not re-use them
+	// anywhere in b/w 0 and 1 is the chance that a living resource will be destroyed at each iteration
+	// By default (0.1), 10% of resources will be destroyed each iteration, the others have a chance to be re-used
+	float ResourceDeletionChance = 0.1f;
 };
 
 struct ShaderFuzzingState {

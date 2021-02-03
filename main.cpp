@@ -222,6 +222,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.CBVUploadRandomFloatData = 0;
+		ShaderConfig.ResourceDeletionChance = 0.1f;
 		{
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);

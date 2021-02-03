@@ -1855,11 +1855,15 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		}
 
 
-		for (auto ResID : AllResourcesInUse)
+		float ResDeleteChance = Fuzzer->Config->ResourceDeletionChance;
+		if (ResDeleteChance > 0.0f)
 		{
-			if (Fuzzer->GetFloat01() < 0.1f)
+			for (auto ResID : AllResourcesInUse)
 			{
-				Fuzzer->D3DPersist->ResourceMgr.RequestResourceDestroyed(ResID);
+				if (ResDeleteChance >= 1.0f || Fuzzer->GetFloat01() < ResDeleteChance)
+				{
+					Fuzzer->D3DPersist->ResourceMgr.RequestResourceDestroyed(ResID);
+				}
 			}
 		}
 
