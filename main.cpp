@@ -217,7 +217,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
-		bool bIsSingleThreaded = true;
+		bool bIsSingleThreaded = false;
 
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
@@ -252,18 +252,18 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 
 			// Single threaded
-			for (int32 i = 0; i < ARRAY_COUNTOF(DebugTestCases); i++)
-			//for (int32 i = 0; i < TestCases; i++)
+			//for (int32 i = 0; i < ARRAY_COUNTOF(DebugTestCases); i++)
+			for (int32 i = 0; i < TestCases; i++)
 			{
 				ShaderFuzzingState Fuzzer;
 				Fuzzer.D3DDevice = Device;
 				Fuzzer.D3DPersist = &PersistState;
 				Fuzzer.Config = &ShaderConfig;
 			
-				LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
-				SetSeedOnFuzzer(&Fuzzer, DebugTestCases[i]);
-				//LOG("Doing round %d of fuzzing...", i);
-				//SetSeedOnFuzzer(&Fuzzer, i);
+				//LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
+				//SetSeedOnFuzzer(&Fuzzer, DebugTestCases[i]);
+				LOG("Doing round %d of fuzzing...", i);
+				SetSeedOnFuzzer(&Fuzzer, i);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
 			}
 			
