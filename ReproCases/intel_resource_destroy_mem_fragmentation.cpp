@@ -1,3 +1,18 @@
+//
+// This is a test app for a simple D3D12 app that should work, but gets a DXGI_ERROR_DEVICE_HUNG error on Intel. It works on Microsoft's WARP and my Nvidia device
+//
+// The timeline of events for the repro as I understand it :
+// -Create resources for frame 0
+// - Draw frame 0
+// - Wait on the CPU for the GPU to finish frame 0, so that no outstanding command lists refer to the resources created
+// - Begin creating resources for frame 1
+// - Delete one of the resources created for frame 0 (all other resources are will leak since we don't care about them)
+// - Draw frame 1
+// - Wait on the CPU for the GPU to finish frame 1
+// - Begin creating resources for frame 2
+// - Observe crash
+// 
+
 
 #include <stdio.h>
 
@@ -170,7 +185,7 @@ D3D12_BLEND_DESC GetDefaultBlendStateDesc() {
 int main(int argc, char** argv) {
 
 	// Repros with or without debug layer,
-	// However the debug layer is gives us DXGI_ERROR_DEVICE_HUNG
+	// However the debug layer is what gives us DXGI_ERROR_DEVICE_HUNG
 	ID3D12Debug1* D3D12DebugLayer = nullptr;
 	D3D12GetDebugInterface(IID_PPV_ARGS(&D3D12DebugLayer));
 	D3D12DebugLayer->EnableDebugLayer();
@@ -308,6 +323,7 @@ int main(int argc, char** argv) {
 	ASSERT(SUCCEEDED(hr));
 	ASSERT(PSO != nullptr);
 
+	// If the command queue is separate for each frame, the bug does not repro. If it's shared then it does repro
 	ID3D12CommandQueue* CommandQueue = nullptr;
 
 	D3D12_COMMAND_QUEUE_DESC CmdQueueDesc = {};
@@ -366,7 +382,8 @@ int main(int argc, char** argv) {
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	Device->CreateRenderTargetView(BackBufferResource, nullptr, rtvHandle);
 
-	for (int32 Iteration = 0; Iteration < 3; Iteration++)
+	// At the end of the second frame is when the device removal occurs, so the start of the third frame is when problems start
+	for (int32 Frame = 0; Frame < 3; Frame++)
 	{
 		ID3D12CommandAllocator* CommandAllocator = nullptr;
 		hr = Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&CommandAllocator));
@@ -410,7 +427,7 @@ int main(int argc, char** argv) {
 
 			CommandList->SetGraphicsRootConstantBufferView(0, CBVResource->GetGPUVirtualAddress());
 
-			if (Iteration == 0)
+			if (Frame == 0)
 			{
 				ResourceToDelete = CBVResource;
 			}
@@ -429,13 +446,13 @@ int main(int argc, char** argv) {
 			hr = Device->CreateCommittedResource(&Props, D3D12_HEAP_FLAG_NONE, &VertResourceDesc, InitialState, nullptr, IID_PPV_ARGS(&VertexBufferRes));
 			ASSERT(SUCCEEDED(hr));
 
-			// This is the earliest place we can put the deletion. It can occur anywhere from here to submitting the second command list (Iteration == 1)
-			// If we delete the resource from iteration 0 before we create the Vertex buffer on iteration 1, then the issue does not repro
-			if (Iteration == 1)
+			// This is the earliest place we can put the deletion. It can occur anywhere from here to submitting the second command list (Frame == 1)
+			// If we delete the resource from frame 0 before we create the Vertex buffer on frame 1, then the issue does not repro
+			if (Frame == 1)
 			{
 				ASSERT(ResourceToDelete != nullptr);
 
-				// Commenting this out allows the app to finish all 3 iterations (or possibly more if you change it)
+				// Commenting this out allows the app to finish all 3 frames (or possibly more if you change it)
 				ResourceToDelete->Release();
 
 				ResourceToDelete = nullptr;
@@ -485,10 +502,10 @@ int main(int argc, char** argv) {
 		CommandQueue->ExecuteCommandLists(1, CommandLists);
 
 		// Signal 1,2,3...etc. because the fence's initial value is 0
-		uint64 ValueSignaled = (uint64)Iteration + 1LLU;
+		uint64 ValueSignaled = (uint64)Frame + 1LLU;
 		CommandQueue->Signal(ExecFence, ValueSignaled);
 
-		// Synchronously wait. Since the resource we will delete is created and only used in iteration 0,
+		// Synchronously wait. Since the resource we will delete is created and only used in frame 0,
 		// it should be safe to delete after this finishes and we go into the next loop
 		HANDLE hEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 		ExecFence->SetEventOnCompletion(ValueSignaled, hEvent);
