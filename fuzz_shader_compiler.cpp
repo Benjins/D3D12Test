@@ -1336,18 +1336,20 @@ static D3D12_BLEND_DESC GetFuzzBlendStateDesc(ShaderFuzzingState* Fuzzer) {
 void FillOutPSOInputElements(std::vector<D3D12_INPUT_ELEMENT_DESC>* OutInputElementDescs, FuzzShaderAST* VertexShader)
 {
 	OutInputElementDescs->empty();
-	OutInputElementDescs->reserve(VertexShader->IAVars.size());
+	OutInputElementDescs->reserve(VertexShader->ShaderMeta.NumParams);
 
-	for (const auto& Var : VertexShader->IAVars)
+	for (int32 IAVarIdx = 0; IAVarIdx < VertexShader->ShaderMeta.NumParams; IAVarIdx++)
 	{
+		auto IAVarMetadata = VertexShader->ShaderMeta.InputParamMetadata[IAVarIdx];
+
 		D3D12_INPUT_ELEMENT_DESC InputElement = {};
 		InputElement.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
 		// TODO: Assumes every param is 16 bytes, which...fair assumption given above
 		InputElement.AlignedByteOffset = 0;// Var.ParamIdx * 16;
-		InputElement.InputSlot = Var.ParamIdx;
+		InputElement.InputSlot = IAVarMetadata.ParamIndex;
 		InputElement.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-		InputElement.SemanticName = GetSemanticNameFromSemantic(Var.Semantic);
-		InputElement.SemanticIndex = Var.SemanticIdx;
+		InputElement.SemanticName = GetSemanticNameFromSemantic(IAVarMetadata.Semantic);
+		InputElement.SemanticIndex = IAVarMetadata.SemanticIndex;
 
 		OutInputElementDescs->push_back(InputElement);
 	}
