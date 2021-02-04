@@ -152,7 +152,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 1;
+	int ChosenAdapterIndex = 2;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -192,7 +192,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	}
 
 
-	//if (0)
+	if (0)
 	{
 		ID3D11Device* Device = nullptr;
 		ID3D11DeviceContext* DeviceContext = nullptr;
@@ -256,7 +256,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.CBVUploadRandomFloatData = 0;
-		ShaderConfig.ResourceDeletionChance = 0.1f;
+		ShaderConfig.ResourceDeletionChance = 0.9f;
 		{
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);
