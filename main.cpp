@@ -25,6 +25,7 @@
 #include "d3d12_ext.h"
 
 #include "fuzz_d3d11_video.h"
+#include "fuzz_reserved_resources.h"
 #include "fuzz_shader_compiler.h"
 #include "fuzz_dxbc.h"
 #include "d3d_resource_mgr.h"
@@ -141,9 +142,9 @@ static bool shouldQuit = false;
 
 int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showCommand) {
 
-	//ID3D12Debug1* D3D12DebugLayer = nullptr;
-	//D3D12GetDebugInterface(IID_PPV_ARGS(&D3D12DebugLayer));
-	//D3D12DebugLayer->EnableDebugLayer();
+	ID3D12Debug1* D3D12DebugLayer = nullptr;
+	D3D12GetDebugInterface(IID_PPV_ARGS(&D3D12DebugLayer));
+	D3D12DebugLayer->EnableDebugLayer();
 	//D3D12DebugLayer->SetEnableGPUBasedValidation(true);
 	//D3D12DebugLayer->SetEnableSynchronizedCommandQueueValidation(true);
 
@@ -224,6 +225,23 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
+
+
+	//if (0)
+	{
+		D3DReservedResourceFuzzingPersistentState Persistent;
+		SetupPersistentOnReservedResourceFuzzer(&Persistent, Device);
+
+		ReservedResourceFuzzingState Fuzzer;
+		Fuzzer.Persistent = &Persistent;
+		Fuzzer.D3DDevice = Device;
+
+		SetSeedOnReservedResourceFuzzer(&Fuzzer, 0);
+		DoIterationsWithReservedResourceFuzzer(&Fuzzer, 1);
+
+		return 0;
+	}
+
 
 	if (0)
 	{
