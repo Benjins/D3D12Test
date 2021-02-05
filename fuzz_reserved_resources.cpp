@@ -22,8 +22,7 @@ void DoIterationsWithReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer
 
 		D3D12_RESOURCE_DESC TextureDesc = CD3DX12_RESOURCE_DESC::Tex2D(TextureFormat, TextureWidth, TextureHeight, 1, 1);
 		TextureDesc.Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
-
-		//TextureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+		TextureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
 		ID3D12Resource* ReservedResource = nullptr;
 		hr = Fuzzer->D3DDevice->CreateReservedResource(&TextureDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&ReservedResource));
@@ -41,6 +40,8 @@ void DoIterationsWithReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer
 		// Add some slack, because
 		int32 NumTilesInHeap = NumTilesForResource + Fuzzer->GetIntInRange(0, NumTilesForResource);
 		D3D12_HEAP_DESC TextureHeapDesc = {};
+		TextureHeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
+		//TextureHeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
 		TextureHeapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
 		TextureHeapDesc.SizeInBytes = (uint64)NumTilesInHeap * D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
 
@@ -64,6 +65,8 @@ void DoIterationsWithReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer
 			Sizes.Width = Fuzzer->GetIntInRange(1, TextureWidthTiles - Coords.X);
 			Sizes.Height = Fuzzer->GetIntInRange(1, TextureHeightTiles - Coords.Y);
 			Sizes.Depth = Fuzzer->GetIntInRange(1, TextureDepthTiles - Coords.Z);
+			Sizes.UseBox = true;
+			Sizes.NumTiles = Sizes.Width * Sizes.Height * Sizes.Depth;
 
 
 			D3D12_TILE_RANGE_FLAGS RangeFlags = D3D12_TILE_RANGE_FLAG_NONE;
@@ -76,6 +79,17 @@ void DoIterationsWithReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer
 
 			Fuzzer->Persistent->CmdQueue->UpdateTileMappings(ReservedResource, 1, &Coords, &Sizes, TextureHeap, 1, &RangeFlags, &RangeHeapOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
 		}
+
+		uint64 ValueToSignal = Fuzzer->Persistent->ExecFenceToSignal;
+
+		Fuzzer->Persistent->CmdQueue->Signal(Fuzzer->Persistent->ExecFence, ValueToSignal);
+
+		Fuzzer->Persistent->DeferCleanupResourceandHeap(ReservedResource, TextureHeap, ValueToSignal);
+
+		uint64 LastCompletedFence = Fuzzer->Persistent->ExecFence->GetCompletedValue();
+		Fuzzer->Persistent->CheckCleanup(LastCompletedFence);
+
+		Fuzzer->Persistent->ExecFenceToSignal++;
 	}
 }
 

@@ -153,7 +153,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 2;
+	int ChosenAdapterIndex = 0;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -232,12 +232,15 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		D3DReservedResourceFuzzingPersistentState Persistent;
 		SetupPersistentOnReservedResourceFuzzer(&Persistent, Device);
 
-		ReservedResourceFuzzingState Fuzzer;
-		Fuzzer.Persistent = &Persistent;
-		Fuzzer.D3DDevice = Device;
+		for (int32 i = 0; i < 10*1000; i++)
+		{
+			ReservedResourceFuzzingState Fuzzer;
+			Fuzzer.Persistent = &Persistent;
+			Fuzzer.D3DDevice = Device;
 
-		SetSeedOnReservedResourceFuzzer(&Fuzzer, 0);
-		DoIterationsWithReservedResourceFuzzer(&Fuzzer, 1);
+			SetSeedOnReservedResourceFuzzer(&Fuzzer, i);
+			DoIterationsWithReservedResourceFuzzer(&Fuzzer, 1);
+		}
 
 		return 0;
 	}
