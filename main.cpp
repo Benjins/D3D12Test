@@ -227,7 +227,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
 
 
-	//if (0)
+	if (0)
 	{
 		bool bIsSingleThreaded = false;
 
@@ -330,7 +330,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.CBVUploadRandomFloatData = 0;
-		ShaderConfig.ResourceDeletionChance = 0.9f;
+		ShaderConfig.ResourceDeletionChance = 0.2f;
+		ShaderConfig.HeapDeletionChance = 0.2f;
 		{
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);

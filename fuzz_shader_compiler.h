@@ -45,6 +45,9 @@ struct ShaderFuzzConfig
 	// anywhere in b/w 0 and 1 is the chance that a living resource will be destroyed at each iteration
 	// By default (0.1), 10% of resources will be destroyed each iteration, the others have a chance to be re-used
 	float ResourceDeletionChance = 0.1f;
+
+	// Same as above, but for heaps instead of resources
+	float HeapDeletionChance = 0.1f;
 };
 
 struct ShaderFuzzingState : FuzzBasicState {

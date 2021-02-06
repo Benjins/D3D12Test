@@ -22,28 +22,152 @@ inline bool CompareD3D12ResourceDesc(const D3D12_RESOURCE_DESC& a, const D3D12_R
 	}
 }
 
+
+template<typename T>
+inline void VectorSwapErase(std::vector<T>* Vec, int32 Index)
+{
+	ASSERT(Index >= 0 && Index < Vec->size());
+	(*Vec)[Index] = (*Vec).back();
+	(*Vec).pop_back();
+}
+
+template<typename T>
+struct D3DRefWrapper
+{
+	T* ptr = nullptr;
+
+	D3DRefWrapper() { }
+
+	~D3DRefWrapper()
+	{
+		if (ptr)
+		{
+			ptr->Release();
+		}
+	}
+
+	D3DRefWrapper(T* _ptr)
+	{
+		ptr = _ptr;
+		ptr->AddRef();
+	}
+
+	D3DRefWrapper(const D3DRefWrapper& orig)
+	{
+		ptr = orig.ptr;
+		if (ptr)
+		{
+			ptr->AddRef();
+		}
+	}
+
+	void operator=(T* origRaw)
+	{
+		if (ptr != origRaw)
+		{
+			if (ptr)
+			{
+				ptr->Release();
+			}
+			ptr = origRaw;
+			if (ptr)
+			{
+				ptr->AddRef();
+			}
+		}
+	}
+
+	void operator=(const D3DRefWrapper& orig)
+	{
+		if (ptr != orig.ptr)
+		{
+			if (ptr)
+			{
+				ptr->Release();
+			}
+			ptr = orig.ptr;
+			if (ptr)
+			{
+				ptr->AddRef();
+			}
+		}
+	}
+
+	D3DRefWrapper(D3DRefWrapper&& orig) = delete;
+	D3DRefWrapper& operator=(D3DRefWrapper&& orig) = delete;
+};
+
 struct ResourceLifecycleManager
 {
+	enum struct ResourceType
+	{
+		Committed,
+		Placed,
+		Reserved
+	};
+
 	struct ResourceDesc
 	{
 		D3D12_RESOURCE_DESC ResDesc;
 		bool IsUploadHeap = false;
+		ResourceType Type = ResourceType::Committed;
 		uint32 CreationNodeIndex = 0;
 		uint32 NodeVisibilityMask = 0x01;
+
+		uint64 ReferencedHeapID = 0;
 
 		bool operator==(const ResourceDesc& Other) const
 		{
 			return CompareD3D12ResourceDesc(Other.ResDesc, ResDesc)
 				&& (Other.IsUploadHeap == IsUploadHeap)
+				&& (Other.Type == Type)
 				&& (Other.CreationNodeIndex == CreationNodeIndex)
 				&& (Other.NodeVisibilityMask == NodeVisibilityMask);
 		}
+	};
+
+	uint64 GetSizeNeededForRes(const ResourceDesc& ResDesc)
+	{
+		D3D12_RESOURCE_ALLOCATION_INFO AllocInfo = D3DDevice->GetResourceAllocationInfo(ResDesc.NodeVisibilityMask, 1, &ResDesc.ResDesc);
+		return AllocInfo.SizeInBytes;
+	}
+
+	struct HeapDesc
+	{
+		uint64 Size = 0;
+		D3D12_HEAP_FLAGS Flags = D3D12_HEAP_FLAG_NONE;
+		uint32 CreationNodeIndex = 0;
+		uint32 NodeVisibilityMask = 0x01;
+
+		bool CanUseFor(const HeapDesc& OtherDesc, uint64 CurrOffset)
+		{
+			return (CreationNodeIndex == OtherDesc.CreationNodeIndex)
+				&& (Flags == OtherDesc.Flags)
+				&& (OtherDesc.NodeVisibilityMask & ~NodeVisibilityMask) == 0
+				&& (Size >= (CurrOffset + OtherDesc.Size));
+		}
+	};
+
+	struct StandaloneHeap
+	{
+		ID3D12Heap* Ptr = nullptr;
+		uint64 HeapID = 0;
+
+		uint64 CurrentOffset = 0;
+
+		HeapDesc Desc;
+
+		uint64 FenceValueToWaitOn = 0;
+
+		int32 CmdListUseCount = 0;
 	};
 
 	struct Resource
 	{
 		ID3D12Resource* Ptr = nullptr;
 		ResourceDesc Desc;
+
+		D3DRefWrapper<ID3D12Heap> ReferencedHeap;
 
 		uint64 ResourceID = 0;
 
@@ -62,21 +186,72 @@ struct ResourceLifecycleManager
 	ID3D12Device* D3DDevice = nullptr;
 
 	uint64 CurrentResourceID = 0;
-
 	std::vector<Resource> LivingResources;
 	std::vector<Resource> ResourcesPendingDelete;
 	std::vector<Resource> ResourcesPendingCmdListFinish;
 
-	uint64 AllocateResource(ResourceDesc Desc, ID3D12Resource** OutRes)
-	{
+	uint64 CurrentHeapID = 0;
+	std::vector<StandaloneHeap> LivingHeaps;
+	std::vector<StandaloneHeap> HeapsPendingDelete;
+	std::vector<StandaloneHeap> HeapsPendingCmdListFinish;
 
-		D3D12_HEAP_PROPERTIES Props = {};
-		Props.Type = (Desc.IsUploadHeap ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT);
-		const D3D12_RESOURCE_STATES InitialState = (Desc.IsUploadHeap ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_DEST);
-		HRESULT hr = D3DDevice->CreateCommittedResource(&Props, D3D12_HEAP_FLAG_NONE, &Desc.ResDesc, InitialState, nullptr, IID_PPV_ARGS(OutRes));
+	uint64 AllocateHeap(HeapDesc Desc, ID3D12Heap** OutHeap)
+	{
+		D3D12_HEAP_DESC HeapDesc = {};
+		HeapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		HeapDesc.Properties.CreationNodeMask = (1 << Desc.CreationNodeIndex);
+		HeapDesc.Properties.VisibleNodeMask = Desc.NodeVisibilityMask;
+		HeapDesc.SizeInBytes = Desc.Size;
+		HeapDesc.Flags = Desc.Flags;
+
+		HRESULT hr = D3DDevice->CreateHeap(&HeapDesc, IID_PPV_ARGS(OutHeap));
 		ASSERT(SUCCEEDED(hr));
 
+		StandaloneHeap StandaloneHeap;
+		StandaloneHeap.Desc = Desc;
+		StandaloneHeap.Ptr = *OutHeap;
+		StandaloneHeap.HeapID = CurrentHeapID;
+		StandaloneHeap.CmdListUseCount = 1;
+		CurrentHeapID++;
+
+		LivingHeaps.push_back(StandaloneHeap);
+		return StandaloneHeap.HeapID;
+	}
+
+	uint64 AllocateResource(ResourceDesc Desc, ID3D12Resource** OutRes)
+	{
 		Resource Res;
+
+		const D3D12_RESOURCE_STATES InitialState = (Desc.IsUploadHeap ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_DEST);
+
+		if (Desc.Type == ResourceType::Committed)
+		{
+			D3D12_HEAP_PROPERTIES Props = {};
+			Props.Type = (Desc.IsUploadHeap ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT);
+			HRESULT hr = D3DDevice->CreateCommittedResource(&Props, D3D12_HEAP_FLAG_NONE, &Desc.ResDesc, InitialState, nullptr, IID_PPV_ARGS(OutRes));
+			ASSERT(SUCCEEDED(hr));
+		}
+		else if (Desc.Type == ResourceType::Placed)
+		{
+			ASSERT(!Desc.IsUploadHeap);
+			auto* ReferencedHeap = InternalGetHeapByID(Desc.ReferencedHeapID);
+
+			HRESULT hr = D3DDevice->CreatePlacedResource(ReferencedHeap->Ptr, ReferencedHeap->CurrentOffset, &Desc.ResDesc, InitialState, nullptr, IID_PPV_ARGS(OutRes));
+			ASSERT(SUCCEEDED(hr));
+
+			uint64 SizeNeeded = GetSizeNeededForRes(Desc);
+			// Round up to align with D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT
+			SizeNeeded = ((SizeNeeded + D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT - 1) / D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT) * D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+
+			ReferencedHeap->CurrentOffset += SizeNeeded;
+
+			Res.ReferencedHeap = ReferencedHeap->Ptr;
+		}
+		else
+		{
+			ASSERT(false);
+		}
+
 		Res.Ptr = *OutRes;
 		Res.Desc = Desc;
 		Res.CmdListUseCount = 1;
@@ -101,8 +276,22 @@ struct ResourceLifecycleManager
 		return nullptr;
 	}
 
+	StandaloneHeap* InternalGetHeapByID(uint64 HeapID)
+	{
+		for (auto& Heap : LivingHeaps)
+		{
+			if (Heap.HeapID == HeapID)
+			{
+				return &Heap;
+			}
+		}
+
+		return nullptr;
+	}
+
 	uint64 AcquireResource(ResourceDesc Desc, ID3D12Resource** OutRes)
 	{
+		ASSERT(Desc.Type == ResourceType::Committed);
 		for (auto& Resource : LivingResources)
 		{
 			if (Resource.Desc == Desc && Resource.CmdListUseCount == 0)
@@ -116,6 +305,77 @@ struct ResourceLifecycleManager
 
 		uint64 ResID = AllocateResource(Desc, OutRes);
 		return ResID;
+	}
+
+	uint64 AcquirePlacedResource(ResourceDesc Desc, ID3D12Resource** OutRes, uint64* OutHeapID)
+	{
+		ASSERT(Desc.Type == ResourceType::Placed);
+		for (auto& Resource : LivingResources)
+		{
+			if (Resource.Desc == Desc && Resource.CmdListUseCount == 0)
+			{
+				// AddRef I guess?
+				*OutRes = Resource.Ptr;
+				Resource.CmdListUseCount++;
+				return Resource.ResourceID;
+			}
+		}
+
+		ResourceLifecycleManager::HeapDesc HeapDesc;
+		uint64 Size = GetSizeNeededForRes(Desc);
+		// Make our heaps in 16 MB chunks
+		// TODO: Tunable/config
+		const uint64 AlignmentThreshold = 16 * 1024 * 1024;
+		Size = ((Size + AlignmentThreshold - 1) / AlignmentThreshold) * AlignmentThreshold;
+		HeapDesc.Size = Size;
+
+		HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
+
+		ID3D12Heap* UnusedHeapPtr = nullptr;
+		uint64 HeapID = AcquireHeap(HeapDesc, &UnusedHeapPtr);
+
+		Desc.ReferencedHeapID = HeapID;
+		*OutHeapID = HeapID;
+
+		uint64 ResID = AllocateResource(Desc, OutRes);
+		return ResID;
+	}
+
+	uint64 AcquireHeap(HeapDesc Desc, ID3D12Heap** OutRes)
+	{
+		for (auto& Heap : LivingHeaps)
+		{
+			if (Heap.Desc.CanUseFor(Desc, Heap.CurrentOffset))
+			{
+				*OutRes = Heap.Ptr;
+				Heap.CmdListUseCount++;
+				return Heap.HeapID;
+			}
+		}
+
+		uint64 HeapID = AllocateHeap(Desc, OutRes);
+		return HeapID;
+	}
+
+	void RelinquishHeap(uint64 HeapID)
+	{
+		for (auto& Heap : LivingHeaps)
+		{
+			if (Heap.HeapID == HeapID)
+			{
+				Heap.CmdListUseCount--;
+				return;
+			}
+		}
+
+		for (auto& Heap : HeapsPendingDelete)
+		{
+			if (Heap.HeapID == HeapID)
+			{
+				Heap.CmdListUseCount--;
+				return;
+			}
+		}
 	}
 
 	void RelinquishResource(uint64 ResourceID)
@@ -141,6 +401,20 @@ struct ResourceLifecycleManager
 		ASSERT(false && "adkfubasfd");
 	}
 
+	void RequestHeapDestroyed(uint64 HeapID)
+	{
+		for (int32 i = 0; i < LivingHeaps.size(); i++)
+		{
+			const auto& Heap = LivingHeaps[i];
+			if (Heap.HeapID == HeapID)
+			{
+				HeapsPendingDelete.push_back(Heap);
+				VectorSwapErase(&LivingHeaps, i);
+				return;
+			}
+		}
+	}
+
 	void RequestResourceDestroyed(uint64 ResourceID)
 	{
 		for (int32 i = 0; i < LivingResources.size(); i++)
@@ -149,10 +423,17 @@ struct ResourceLifecycleManager
 			if (Resource.ResourceID == ResourceID)
 			{
 				ResourcesPendingDelete.push_back(Resource);
-				LivingResources[i] = LivingResources.back();
-				LivingResources.pop_back();
+				VectorSwapErase(&LivingResources, i);
 				return;
 			}
+		}
+	}
+
+	void ResetAllHeapOffsets()
+	{
+		for (auto& Heap : LivingHeaps)
+		{
+			Heap.CurrentOffset = 0;
 		}
 	}
 
@@ -165,8 +446,19 @@ struct ResourceLifecycleManager
 			{
 				Resource.FenceValueToWaitOn = SignaledValue;
 				ResourcesPendingCmdListFinish.push_back(Resource);
-				ResourcesPendingDelete[i] = ResourcesPendingDelete.back();
-				ResourcesPendingDelete.pop_back();
+				VectorSwapErase(&ResourcesPendingDelete, i);
+				i--;
+			}
+		}
+
+		for (int32 i = 0; i < HeapsPendingDelete.size(); i++)
+		{
+			auto& Heap = HeapsPendingDelete[i];
+			if (Heap.CmdListUseCount == 0)
+			{
+				Heap.FenceValueToWaitOn = SignaledValue;
+				HeapsPendingCmdListFinish.push_back(Heap);
+				VectorSwapErase(&HeapsPendingDelete, i);
 				i--;
 			}
 		}
@@ -182,8 +474,20 @@ struct ResourceLifecycleManager
 			{
 				Resource.Ptr->Release();
 
-				ResourcesPendingCmdListFinish[i] = ResourcesPendingCmdListFinish.back();
-				ResourcesPendingCmdListFinish.pop_back();
+				VectorSwapErase(&ResourcesPendingCmdListFinish, i);
+				i--;
+			}
+		}
+
+		for (int32 i = 0; i < HeapsPendingCmdListFinish.size(); i++)
+		{
+			auto& Heap = HeapsPendingCmdListFinish[i];
+
+			if (FrameFenceValue >= Heap.FenceValueToWaitOn)
+			{
+				Heap.Ptr->Release();
+
+				VectorSwapErase(&HeapsPendingCmdListFinish, i);
 				i--;
 			}
 		}
@@ -220,7 +524,6 @@ struct ResourceLifecycleManager
 
 	void PerformResourceTransitions(const std::vector<ResourceToTransition>& ResourceTransitions, ID3D12GraphicsCommandList* CommandList)
 	{
-
 		std::vector<D3D12_RESOURCE_BARRIER> Barriers;
 		
 		for (const auto& ResourceTransition : ResourceTransitions)

@@ -1576,6 +1576,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		// Create resources (including backbuffer?)
 		ID3D12Resource* BackBufferResource = nullptr;
 		std::vector<uint64> AllResourcesInUse;
+		std::unordered_map<uint64, int32> AllHeapsInUseAndCounts;
 		{
 			ResourceLifecycleManager::ResourceDesc BackBufferDesc = {};
 			BackBufferDesc.NodeVisibilityMask = 0x01;
@@ -1653,7 +1654,22 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			UploadResDesc.ResDesc = UploadResourceDesc;
 			UploadResDesc.IsUploadHeap = true;
 
-			uint64 ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(ResDesc, &TextureResource);
+			uint64 ResID = 0;
+			if (Fuzzer->GetFloat01() < 0.3f)
+			{
+				ResDesc.Type = ResourceLifecycleManager::ResourceType::Placed;
+
+				uint64 HeapID = 0;
+				ResID = Fuzzer->D3DPersist->ResourceMgr.AcquirePlacedResource(ResDesc, &TextureResource, &HeapID);
+
+				AllHeapsInUseAndCounts[HeapID]++;
+			}
+			else
+			{
+				ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(ResDesc, &TextureResource);
+			}
+
+			
 			uint64 UploadResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(UploadResDesc, &TextureUploadResource);
 
 			void* pTexturePixelData = nullptr;
@@ -1846,6 +1862,15 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			Fuzzer->D3DPersist->ResourceMgr.RelinquishResource(ResID);
 		}
 
+		for (auto HeapIDAndCount: AllHeapsInUseAndCounts)
+		{
+			uint64 HeapID = HeapIDAndCount.first;
+			int32 Count = HeapIDAndCount.second;
+			for (int32 i = 0; i < Count; i++)
+			{
+				Fuzzer->D3DPersist->ResourceMgr.RelinquishHeap(HeapID);
+			}
+		}
 
 		float ResDeleteChance = Fuzzer->Config->ResourceDeletionChance;
 		if (ResDeleteChance > 0.0f)
@@ -1859,6 +1884,22 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			}
 		}
 
+		float HeapDeleteChance = Fuzzer->Config->HeapDeletionChance;
+		if (HeapDeleteChance > 0.0f)
+		{
+			for (auto HeapIDAndCount : AllHeapsInUseAndCounts)
+			{
+				uint64 HeapID = HeapIDAndCount.first;
+				if (HeapDeleteChance >= 1.0f || Fuzzer->GetFloat01() < HeapDeleteChance)
+				{
+					Fuzzer->D3DPersist->ResourceMgr.RequestHeapDestroyed(HeapID);
+				}
+			}
+		}
+
+		// TODO: Is this safe to do here, or do we need to have some sort of recycling system that tracks
+		// if there are any outstanding uses of the heap on the command queue?
+		Fuzzer->D3DPersist->ResourceMgr.ResetAllHeapOffsets();
 
 		ID3D12CommandList* CommandLists[] = { CommandList };
 		if (Fuzzer->Config->LockMutexAroundExecCmdList != 0)
