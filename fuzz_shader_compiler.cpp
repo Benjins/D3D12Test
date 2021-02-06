@@ -1655,7 +1655,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			UploadResDesc.IsUploadHeap = true;
 
 			uint64 ResID = 0;
-			if (Fuzzer->GetFloat01() < 0.3f)
+			if (Fuzzer->GetFloat01() < Fuzzer->Config->PlacedResourceChance)
 			{
 				ResDesc.Type = ResourceLifecycleManager::ResourceType::Placed;
 
@@ -1669,7 +1669,6 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 				ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(ResDesc, &TextureResource);
 			}
 
-			
 			uint64 UploadResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(UploadResDesc, &TextureUploadResource);
 
 			void* pTexturePixelData = nullptr;

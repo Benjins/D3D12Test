@@ -192,18 +192,6 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		return 0;
 	}
 
-
-	if (0)
-	{
-		// Resources I guess?
-
-		//ResourceLifecycleManager ResourceMgr;
-		//ResourceMgr.D3DDevice = Device;
-
-
-		return 0;
-	}
-
 	if (0)
 	{
 		const char* ExampleShaderFilename = "../example_shaders/9795564935892538031_pixel.dxbc";
@@ -226,6 +214,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderConfig.CBVUploadRandomFloatData = 0;
 		ShaderConfig.ResourceDeletionChance = 0.2f;
 		ShaderConfig.HeapDeletionChance = 0.2f;
+		ShaderConfig.PlacedResourceChance = 0.3f;
+
 		{
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);

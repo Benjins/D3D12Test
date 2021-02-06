@@ -48,6 +48,9 @@ struct ShaderFuzzConfig
 
 	// Same as above, but for heaps instead of resources
 	float HeapDeletionChance = 0.1f;
+
+	// The chance that a given resource (right now only immutable textures) will be a placed resource instead of a committed one
+	float PlacedResourceChance = 0.3f;
 };
 
 struct ShaderFuzzingState : FuzzBasicState {
