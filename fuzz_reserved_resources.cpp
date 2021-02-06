@@ -8,19 +8,155 @@ void SetSeedOnReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer, uint6
 	Fuzzer->RNGState.seed(Seed);
 }
 
+// TODO: Put in some utils header
+// TODO: Would bits make more sense for when it's not a byte-aligned format?
+int32 GetBytesPerPixelForFormat(DXGI_FORMAT fmt)
+{
+    switch (fmt)
+    {
+    case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+    case DXGI_FORMAT_R32G32B32A32_FLOAT:
+    case DXGI_FORMAT_R32G32B32A32_UINT:
+    case DXGI_FORMAT_R32G32B32A32_SINT:
+        return 16;
+
+    case DXGI_FORMAT_R32G32B32_TYPELESS:
+    case DXGI_FORMAT_R32G32B32_FLOAT:
+    case DXGI_FORMAT_R32G32B32_UINT:
+    case DXGI_FORMAT_R32G32B32_SINT:
+        return 12;
+
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+    case DXGI_FORMAT_R16G16B16A16_UNORM:
+    case DXGI_FORMAT_R16G16B16A16_UINT:
+    case DXGI_FORMAT_R16G16B16A16_SNORM:
+    case DXGI_FORMAT_R16G16B16A16_SINT:
+    case DXGI_FORMAT_R32G32_TYPELESS:
+    case DXGI_FORMAT_R32G32_FLOAT:
+    case DXGI_FORMAT_R32G32_UINT:
+    case DXGI_FORMAT_R32G32_SINT:
+    case DXGI_FORMAT_R32G8X24_TYPELESS:
+    case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+    case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+    case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+    case DXGI_FORMAT_Y416:
+    case DXGI_FORMAT_Y210:
+    case DXGI_FORMAT_Y216:
+        return 8;
+
+    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+    case DXGI_FORMAT_R10G10B10A2_UINT:
+    case DXGI_FORMAT_R11G11B10_FLOAT:
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+    case DXGI_FORMAT_R8G8B8A8_UINT:
+    case DXGI_FORMAT_R8G8B8A8_SNORM:
+    case DXGI_FORMAT_R8G8B8A8_SINT:
+    case DXGI_FORMAT_R16G16_TYPELESS:
+    case DXGI_FORMAT_R16G16_FLOAT:
+    case DXGI_FORMAT_R16G16_UNORM:
+    case DXGI_FORMAT_R16G16_UINT:
+    case DXGI_FORMAT_R16G16_SNORM:
+    case DXGI_FORMAT_R16G16_SINT:
+    case DXGI_FORMAT_R32_TYPELESS:
+    case DXGI_FORMAT_D32_FLOAT:
+    case DXGI_FORMAT_R32_FLOAT:
+    case DXGI_FORMAT_R32_UINT:
+    case DXGI_FORMAT_R32_SINT:
+    case DXGI_FORMAT_R24G8_TYPELESS:
+    case DXGI_FORMAT_D24_UNORM_S8_UINT:
+    case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+    case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+    case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+    case DXGI_FORMAT_R8G8_B8G8_UNORM:
+    case DXGI_FORMAT_G8R8_G8B8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+    case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+    case DXGI_FORMAT_AYUV:
+    case DXGI_FORMAT_Y410:
+    case DXGI_FORMAT_YUY2:
+        return 4;
+
+    case DXGI_FORMAT_P010:
+    case DXGI_FORMAT_P016:
+        return 3;
+
+    case DXGI_FORMAT_R8G8_TYPELESS:
+    case DXGI_FORMAT_R8G8_UNORM:
+    case DXGI_FORMAT_R8G8_UINT:
+    case DXGI_FORMAT_R8G8_SNORM:
+    case DXGI_FORMAT_R8G8_SINT:
+    case DXGI_FORMAT_R16_TYPELESS:
+    case DXGI_FORMAT_R16_FLOAT:
+    case DXGI_FORMAT_D16_UNORM:
+    case DXGI_FORMAT_R16_UNORM:
+    case DXGI_FORMAT_R16_UINT:
+    case DXGI_FORMAT_R16_SNORM:
+    case DXGI_FORMAT_R16_SINT:
+    case DXGI_FORMAT_B5G6R5_UNORM:
+    case DXGI_FORMAT_B5G5R5A1_UNORM:
+    case DXGI_FORMAT_A8P8:
+    case DXGI_FORMAT_B4G4R4A4_UNORM:
+        return 2;
+
+    case DXGI_FORMAT_R8_TYPELESS:
+    case DXGI_FORMAT_R8_UNORM:
+    case DXGI_FORMAT_R8_UINT:
+    case DXGI_FORMAT_R8_SNORM:
+    case DXGI_FORMAT_R8_SINT:
+    case DXGI_FORMAT_A8_UNORM:
+    case DXGI_FORMAT_AI44:
+    case DXGI_FORMAT_IA44:
+    case DXGI_FORMAT_P8:
+        return 1;
+
+    default:
+        return 0;
+    }
+}
+
 void DoIterationsWithReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer, int32_t NumIterations)
 {
 	HRESULT hr;
 
 	for (int32 Iteration = 0; Iteration < NumIterations; Iteration++)
 	{
-		int32 TextureWidth = 1024;
-		int32 TextureHeight = 1024;
-		DXGI_FORMAT TextureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+		DXGI_FORMAT PossibleFormats[] = {
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_B8G8R8A8_UNORM,
+			DXGI_FORMAT_R32G32_FLOAT,
+			DXGI_FORMAT_R32G32B32A32_FLOAT,
+			DXGI_FORMAT_B5G6R5_UNORM
+		};
 
-		int32 bpp = 4;
+		int32 TextureWidth = 1 << Fuzzer->GetIntInRange(8, 10);
+		int32 TextureHeight = 1 << Fuzzer->GetIntInRange(8, 10);
+		int32 TextureDepth = 1;
+		
+		DXGI_FORMAT TextureFormat = PossibleFormats[Fuzzer->GetIntInRange(0, ARRAY_COUNTOF(PossibleFormats) - 1)];
 
-		D3D12_RESOURCE_DESC TextureDesc = CD3DX12_RESOURCE_DESC::Tex2D(TextureFormat, TextureWidth, TextureHeight, 1, 1);
+		int32 bpp = GetBytesPerPixelForFormat(TextureFormat);
+
+		D3D12_RESOURCE_DESC TextureDesc = {};
+		if (Fuzzer->GetFloat01() < 0.5f)
+		{
+			TextureDesc = CD3DX12_RESOURCE_DESC::Tex2D(TextureFormat, TextureWidth, TextureHeight, 1, 1);
+		}
+		else
+		{
+			TextureWidth = 1 << Fuzzer->GetIntInRange(6, 8);
+			TextureHeight = 1 << Fuzzer->GetIntInRange(6, 8);
+			TextureDepth = 1 << Fuzzer->GetIntInRange(5, 9);
+			TextureDesc = CD3DX12_RESOURCE_DESC::Tex3D(TextureFormat, TextureWidth, TextureHeight, TextureDepth, 1);
+		}
 		TextureDesc.Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
 		TextureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
@@ -36,9 +172,12 @@ void DoIterationsWithReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer
 		UINT NumSubresourceTiling = 0;
 		D3D12_SUBRESOURCE_TILING SubresourceTiling = {};
 		Fuzzer->D3DDevice->GetResourceTiling(ReservedResource, &NumTilesForResource, &PackedMipInfo, &TileShape, &NumSubresourceTiling, 0, &SubresourceTiling);
+		ASSERT(NumTilesForResource > 0);
+		// Don't support this yet lol
+		ASSERT(PackedMipInfo.NumPackedMips == 0);
 
 		// Add some slack, because
-		int32 NumTilesInHeap = NumTilesForResource + Fuzzer->GetIntInRange(0, NumTilesForResource);
+		int32 NumTilesInHeap = NumTilesForResource + Fuzzer->GetIntInRange(0, 16);
 		D3D12_HEAP_DESC TextureHeapDesc = {};
 		TextureHeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
 		//TextureHeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
@@ -48,9 +187,9 @@ void DoIterationsWithReservedResourceFuzzer(ReservedResourceFuzzingState* Fuzzer
 		ID3D12Heap* TextureHeap = nullptr;
 		Fuzzer->D3DDevice->CreateHeap(&TextureHeapDesc, IID_PPV_ARGS(&TextureHeap));
 
-		int32 TextureWidthTiles = TextureWidth / TileShape.WidthInTexels;
-		int32 TextureHeightTiles = TextureHeight / TileShape.HeightInTexels;
-		int32 TextureDepthTiles = 1; // TODO: For volumetrics, this isn't 1 always
+		int32 TextureWidthTiles = (TextureWidth + TileShape.WidthInTexels - 1) / TileShape.WidthInTexels;
+		int32 TextureHeightTiles = (TextureHeight + TileShape.HeightInTexels - 1) / TileShape.HeightInTexels;
+		int32 TextureDepthTiles = (TextureDepth + TileShape.DepthInTexels - 1) / TileShape.DepthInTexels;
 
 
 		for (int32 MappingIteration = 0; MappingIteration < 30; MappingIteration++)

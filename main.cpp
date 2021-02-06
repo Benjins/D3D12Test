@@ -229,17 +229,70 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
-		D3DReservedResourceFuzzingPersistentState Persistent;
-		SetupPersistentOnReservedResourceFuzzer(&Persistent, Device);
+		bool bIsSingleThreaded = false;
 
-		for (int32 i = 0; i < 10*1000; i++)
+		if (bIsSingleThreaded)
 		{
-			ReservedResourceFuzzingState Fuzzer;
-			Fuzzer.Persistent = &Persistent;
-			Fuzzer.D3DDevice = Device;
+			D3DReservedResourceFuzzingPersistentState Persistent;
+			SetupPersistentOnReservedResourceFuzzer(&Persistent, Device);
 
-			SetSeedOnReservedResourceFuzzer(&Fuzzer, i);
-			DoIterationsWithReservedResourceFuzzer(&Fuzzer, 1);
+			for (int32 i = 0; i < 10*1000; i++)
+			{
+				ReservedResourceFuzzingState Fuzzer;
+				Fuzzer.Persistent = &Persistent;
+				Fuzzer.D3DDevice = Device;
+
+				LOG("Setting seed %d on fuzzer", i);
+				SetSeedOnReservedResourceFuzzer(&Fuzzer, i);
+				DoIterationsWithReservedResourceFuzzer(&Fuzzer, 1);
+			}
+		}
+		else
+		{
+			const int32 ThreadCount = 3;
+			std::vector<std::thread> FuzzThreads;
+			uint64 StartingTime = time(NULL);
+			LOG("Starting time: %llu", StartingTime);
+
+			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
+			{
+				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, StartingTime = StartingTime]() {
+					D3DReservedResourceFuzzingPersistentState PersistState;
+					SetupPersistentOnReservedResourceFuzzer(&PersistState, Device);
+
+					for (int32 i = 0; i < 128 * 1000; i++)
+					{
+						ReservedResourceFuzzingState Fuzzer;
+						Fuzzer.D3DDevice = Device;
+						Fuzzer.Persistent = &PersistState;
+
+						uint64 InitialFuzzSeed = 0;
+
+						// If we want to have different fuzzing each process run. Good once a fuzzer is established.
+						InitialFuzzSeed += StartingTime * 0x8D3F77LLU;
+
+						InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
+						InitialFuzzSeed += i;
+
+						// In theory can cause contention maybe or slow things down? Idk, can remove this
+						LOG("Fuzing with seed %llu", InitialFuzzSeed);
+
+						SetSeedOnReservedResourceFuzzer(&Fuzzer, InitialFuzzSeed);
+						DoIterationsWithReservedResourceFuzzer(&Fuzzer, 1);
+
+						// Helpful if we want some output to know that it's going but don't want spam
+						//if (i % 100 == 0)
+						//{
+						//	LOG("Thread %d run %d finished", TIdx, i);
+						//}
+					}
+				});
+			}
+
+			for (auto& Thread : FuzzThreads)
+			{
+				Thread.join();
+			}
 		}
 
 		return 0;
