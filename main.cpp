@@ -48,7 +48,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 0;
+	int ChosenAdapterIndex = 2;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -125,7 +125,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	//if (0)
 	{
 
-		bool bIsSingleThreaded = true;
+		bool bIsSingleThreaded = false;
 
 		if (bIsSingleThreaded)
 		{
@@ -143,7 +143,46 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 				DoIterationsWithTextureCompressionFuzzer(&Fuzzer, 1);
 			}
 		}
+		else
+		{
+			const int32 ThreadCount = 16;
+			std::vector<std::thread> FuzzThreads;
+			uint64 StartingTime = time(NULL);
+			LOG("Starting time: %llu", StartingTime);
 
+			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
+			{
+				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, StartingTime = StartingTime]() {
+					D3DTextureCompressionFuzzingPersistentState Persistent;
+					SetupPersistentOnTextureCompressionFuzzer(&Persistent, Device);
+
+					for (int32 i = 0; i < 1024 * 1024; i++)
+					{
+						uint64 InitialFuzzSeed = 0;
+
+						// If we want to have different fuzzing each process run. Good once a fuzzer is established.
+						InitialFuzzSeed += StartingTime * 0x8FD3F77LLU;
+
+						InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
+						InitialFuzzSeed += i;
+
+						// In theory can cause contention maybe or slow things down? Idk, can remove this
+						LOG("Fuzing with seed %llu", InitialFuzzSeed);
+
+						TextureCompressionFuzzingState Fuzzer;
+						Fuzzer.Persistent = &Persistent;
+						Fuzzer.D3DDevice = Device;
+						SetSeedOnTextureCompressionFuzzer(&Fuzzer, InitialFuzzSeed);
+						DoIterationsWithTextureCompressionFuzzer(&Fuzzer, 1);
+					}
+				});
+			}
+
+			for (auto& Thread : FuzzThreads)
+			{
+				Thread.join();
+			}
+		}
 
 		return 0;
 	}
