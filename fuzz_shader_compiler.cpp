@@ -858,38 +858,6 @@ void VerifyShaderCompilation(FuzzShaderAST* ShaderAST)
 	snprintf(ShaderSourceName, sizeof(ShaderSourceName), "<SHADER_FUZZ_FILE>");
 
 	ShaderAST->ByteCodeBlob = CompileShaderCode(ShaderAST->SourceCode.c_str(), ShaderAST->Type, ShaderSourceName, "Main", &ShaderAST->ShaderMeta);
-
-	//ID3DBlob* ByteCode = nullptr;
-	//ID3DBlob* ErrorMsg = nullptr;
-	//UINT CompilerFlags = D3DCOMPILE_DEBUG;
-	//
-	//char ShaderSourceName[256] = {};
-	//snprintf(ShaderSourceName, sizeof(ShaderSourceName), "");
-	//
-	//HRESULT hr = D3DCompile(ShaderAST->SourceCode.c_str(), ShaderAST->SourceCode.size(), ShaderSourceName, nullptr, nullptr, "Main", GetTargetForShaderType(ShaderAST->Type), CompilerFlags, 0, &ByteCode, &ErrorMsg);
-	//if (SUCCEEDED(hr)) {
-	//	D3D12_SHADER_BYTECODE ByteCodeObj;
-	//	ByteCodeObj.pShaderBytecode = ByteCode->GetBufferPointer();
-	//	ByteCodeObj.BytecodeLength = ByteCode->GetBufferSize();
-	//
-	//	// TODO: Grab metadata
-	//	ID3D12ShaderReflection* ShaderReflection = nullptr;
-	//	hr = D3DReflect(ByteCodeObj.pShaderBytecode, ByteCodeObj.BytecodeLength, IID_PPV_ARGS(&ShaderReflection));
-	//
-	//	//ShaderMetadata
-	//
-	//	ShaderAST->ByteCode = ByteCodeObj;
-	//	ShaderAST->ByteCodeBlob = ByteCode;
-	//}
-	//else
-	//{
-	//	LOG("Compile of '%s' failed, hr = 0x%08X, err msg = '%s'", ShaderSourceName, hr, (ErrorMsg && ErrorMsg->GetBufferPointer()) ? (const char*)ErrorMsg->GetBufferPointer() : "<NONE_GIVEN>");
-	//
-	//	LOG("Dumping shader source....");
-	//	OutputDebugStringA(ShaderAST->SourceCode.c_str());
-	//
-	//	ASSERT(false && "Fix the damn shaders");
-	//}
 }
 
 struct RootSigResourceDesc
@@ -1621,6 +1589,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			
 			ID3D12DescriptorHeap* DescriptorHeap = nullptr;
 			Fuzzer->D3DDevice->CreateDescriptorHeap(&DescriptorHeapDesc, IID_PPV_ARGS(&DescriptorHeap));
+			// TODO: Leaking DescriptorHeap
 
 			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 			Fuzzer->D3DDevice->CreateRenderTargetView(BackBufferResource, nullptr, rtvHandle);
@@ -1700,6 +1669,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 			srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 			hr = Fuzzer->D3DDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&TextureSRVHeap));
+			// TODO: Leaking TextureSRVHeap
 
 			ASSERT(SUCCEEDED(hr));
 

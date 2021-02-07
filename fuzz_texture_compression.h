@@ -14,7 +14,11 @@ struct D3DTextureCompressionFuzzingPersistentState {
 	// We have to start signaling with 1, since the initial value of the fence is 0
 	int32 ExecFenceToSignal = 1;
 
-	//ID3D12PipelineState* BlitPSO = nullptr;
+	ID3D12PipelineState* BlitPSO = nullptr;
+	ID3D12RootSignature* BlitRootSig = nullptr;
+
+	ID3D12Resource* VertBufferPos = nullptr;
+	ID3D12Resource* VertBufferUVs = nullptr;
 };
 
 struct TextureCompressionFuzzingState : FuzzBasicState {
