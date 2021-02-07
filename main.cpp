@@ -26,6 +26,7 @@
 
 #include "fuzz_d3d11_video.h"
 #include "fuzz_reserved_resources.h"
+#include "fuzz_texture_compression.h"
 #include "fuzz_shader_compiler.h"
 #include "fuzz_dxbc.h"
 #include "d3d_resource_mgr.h"
@@ -119,6 +120,33 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	ID3D12Device* Device = nullptr;
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
+
+
+	//if (0)
+	{
+
+		bool bIsSingleThreaded = true;
+
+		if (bIsSingleThreaded)
+		{
+			D3DTextureCompressionFuzzingPersistentState Persistent;
+			SetupPersistentOnTextureCompressionFuzzer(&Persistent, Device);
+
+			for (int32 i = 0; i < 10 * 1000; i++)
+			{
+				TextureCompressionFuzzingState Fuzzer;
+				Fuzzer.Persistent = &Persistent;
+				Fuzzer.D3DDevice = Device;
+
+				LOG("Setting seed %d on fuzzer", i);
+				SetSeedOnTextureCompressionFuzzer(&Fuzzer, i);
+				DoIterationsWithTextureCompressionFuzzer(&Fuzzer, 1);
+			}
+		}
+
+
+		return 0;
+	}
 
 
 	if (0)
