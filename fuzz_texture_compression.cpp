@@ -6,6 +6,9 @@
 #include "d3d12_ext.h"
 
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 //#define WITH_PIPELINE_STATS_QUERY
 
 static D3D12_RASTERIZER_DESC GetDefaultRasterizerDesc()
@@ -240,7 +243,7 @@ void DoIterationsWithTextureCompressionFuzzer(TextureCompressionFuzzingState* Fu
 		const DXGI_FORMAT UncompressedTextureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
 		// TODO?????
-		const int32 BufferSize = 4096 + 1024;
+		const int32 BufferSize = TextureWidth * TextureHeight;
 
 
 		std::vector<ID3D12DescriptorHeap*> DescriptorHeaps;
@@ -290,6 +293,15 @@ void DoIterationsWithTextureCompressionFuzzer(TextureCompressionFuzzingState* Fu
 			D3D12_RESOURCE_DESC RenderTextureResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(UncompressedTextureFormat, TextureWidth, TextureHeight, 1, 1);
 			RenderTextureResourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 			hr = Fuzzer->D3DDevice->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &RenderTextureResourceDesc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&RenderTextureResource));
+			ASSERT(SUCCEEDED(hr));
+		}
+
+		ID3D12Resource* RenderReadbackResource = nullptr;
+		{
+			D3D12_HEAP_PROPERTIES HeapProps = {};
+			HeapProps.Type = D3D12_HEAP_TYPE_READBACK;
+			D3D12_RESOURCE_DESC RenderReadbackResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(TextureWidth * TextureHeight * 4);
+			hr = Fuzzer->D3DDevice->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &RenderReadbackResourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&RenderReadbackResource));
 			ASSERT(SUCCEEDED(hr));
 		}
 
@@ -431,6 +443,34 @@ void DoIterationsWithTextureCompressionFuzzer(TextureCompressionFuzzingState* Fu
 
 		CommandList->DrawInstanced(VertexCount, 1, 0, 0);
 
+		{
+			D3D12_RESOURCE_BARRIER Barrier = {};
+			Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			Barrier.Transition.pResource = RenderTextureResource;
+			Barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+			Barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+			Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			CommandList->ResourceBarrier(1, &Barrier);
+		}
+
+		{
+			D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};
+			CopyLocDst.pResource = RenderReadbackResource;
+			CopyLocDst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+			CopyLocDst.PlacedFootprint.Offset = 0;
+			CopyLocDst.PlacedFootprint.Footprint.Width = TextureWidth;
+			CopyLocDst.PlacedFootprint.Footprint.Height = TextureHeight;
+			CopyLocDst.PlacedFootprint.Footprint.Depth = 1;
+			CopyLocDst.PlacedFootprint.Footprint.RowPitch = TextureWidth * 4;
+			CopyLocDst.PlacedFootprint.Footprint.Format = UncompressedTextureFormat;
+
+			CopyLocSrc.pResource = RenderTextureResource;
+			CopyLocSrc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			CopyLocSrc.SubresourceIndex = 0;
+
+			CommandList->CopyTextureRegion(&CopyLocDst, 0, 0, 0, &CopyLocSrc, nullptr);
+		}
+
 #if defined(WITH_PIPELINE_STATS_QUERY)
 		CommandList->EndQuery(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
 
@@ -462,6 +502,18 @@ void DoIterationsWithTextureCompressionFuzzer(TextureCompressionFuzzingState* Fu
 		WaitForSingleObject(hEvent, INFINITE);
 		CloseHandle(hEvent);
 
+		//{
+		//	void* pPixelData = nullptr;
+		//	HRESULT hr = RenderReadbackResource->Map(0, nullptr, &pPixelData);
+		//	ASSERT(SUCCEEDED(hr));
+		//
+		//	char filename[256] = {};
+		//	snprintf(filename, sizeof(filename), "../compressed_textures/small_bc3_%llu.png", Fuzzer->InitialFuzzSeed);
+		//	stbi_write_png(filename, TextureWidth, TextureHeight, 4, pPixelData, 0);
+		//
+		//	RenderReadbackResource->Unmap(0, nullptr);
+		//}
+
 #if defined(WITH_PIPELINE_STATS_QUERY)
 		D3D12_RANGE PipelineRange;
 		PipelineRange.Begin = 0;
@@ -488,6 +540,7 @@ void DoIterationsWithTextureCompressionFuzzer(TextureCompressionFuzzingState* Fu
 		UploadBuffer->Release();
 		TextureResource->Release();
 		RenderTextureResource->Release();
+		RenderReadbackResource->Release();
 	}
 }
 
