@@ -122,7 +122,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	ASSERT(SUCCEEDED(D3D12CreateDevice(ChosenAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&Device))));
 
 
-	//if (0)
+	if (0)
 	{
 
 		bool bIsSingleThreaded = false;
