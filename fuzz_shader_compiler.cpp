@@ -1541,8 +1541,8 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			BufferedResourceTransitions.clear();
 		};
 
-		const int32 RTWidth = 512;
-		const int32 RTHeight = 512;
+		const int32 RTWidth = Fuzzer->Config->RTWidth;
+		const int32 RTHeight = Fuzzer->Config->RTHeight;
 
 		// Create resources (including backbuffer?)
 		uint64 BackBufferResourceID = 0;
@@ -1564,7 +1564,10 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			BackBufferResourceID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(BackBufferDesc, &BackBufferResource);
 			AllResourcesInUse.push_back(BackBufferResourceID);
 
+			BackBufferResource->SetName(L"Backbuffer");
+
 			TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			FlushResourceTransitions();
 		}
 
 		CommandList->SetPipelineState(PSO);
@@ -1599,6 +1602,12 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			Fuzzer->D3DDevice->CreateRenderTargetView(BackBufferResource, nullptr, rtvHandle);
 
 			CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+			if (Fuzzer->Config->ShouldClearRTVBeforeCase)
+			{
+				float ClearColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				CommandList->ClearRenderTargetView(rtvHandle, ClearColor, 0, nullptr);
+			}
 		}
 
 		// Setup resources (resource transitions?)
@@ -1828,9 +1837,9 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		CommandList->ResolveQueryData(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0, 1, DestBuffer, 0);
 #endif
 
-		const bool bReadbackImage = true;
+		const bool ShouldReadbackImage = Fuzzer->Config->ShouldReadbackImage;
 
-		if (bReadbackImage)
+		if (ShouldReadbackImage)
 		{
 			ASSERT(Fuzzer->D3DPersist->RTReadback != nullptr);
 			
@@ -1966,8 +1975,9 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		//LOG("Avg PS calls per fuzz case: %3.2f", PSCallsPerCase);
 #endif
 
-		if (bReadbackImage)
+		if (ShouldReadbackImage)
 		{
+			// Have to wait for the GPU to finish before we can map the buffer that is filled w/ a copy of the render target
 			HANDLE hEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 			Fuzzer->D3DPersist->ExecFence->SetEventOnCompletion(ValueSignaled, hEvent);
 			WaitForSingleObject(hEvent, INFINITE);
@@ -1975,17 +1985,16 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 			auto* RTReadback = Fuzzer->D3DPersist->RTReadback;
 			ASSERT(RTReadback != nullptr);
-			{
-				void* pPixelData = nullptr;
-				HRESULT hr = RTReadback->Map(0, nullptr, &pPixelData);
-				ASSERT(SUCCEEDED(hr));
-			
-				char filename[256] = {};
-				snprintf(filename, sizeof(filename), "../texture_output/rt_512_%llu_adapter2.png", Fuzzer->InitialFuzzSeed);
-				stbi_write_png(filename, RTWidth, RTHeight, 4, pPixelData, 0);
-			
-				RTReadback->Unmap(0, nullptr);
-			}
+
+			void* pPixelData = nullptr;
+			HRESULT hr = RTReadback->Map(0, nullptr, &pPixelData);
+			ASSERT(SUCCEEDED(hr));
+
+			char filename[256] = {};
+			snprintf(filename, sizeof(filename), "../render_output/%s%llu%s.png", Fuzzer->Config->ReadbackImageNamePrepend, Fuzzer->InitialFuzzSeed, Fuzzer->Config->ReadbackImageNameAppend);
+			stbi_write_png(filename, RTWidth, RTHeight, 4, pPixelData, 0);
+
+			RTReadback->Unmap(0, nullptr);
 		}
 
 
@@ -2001,7 +2010,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 }
 
 
-void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ID3D12Device* Device)
+void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ShaderFuzzConfig* Config, ID3D12Device* Device)
 {
 	D3D12_COMMAND_QUEUE_DESC CmdQueueDesc = {};
 	CmdQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -2010,8 +2019,8 @@ void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ID3D12Devi
 	ASSERT(SUCCEEDED(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Persist->ExecFence))));
 
 	{
-		const int32 RTWidth = 512;
-		const int32 RTHeight = 512;
+		const int32 RTWidth = Config->RTWidth;
+		const int32 RTHeight = Config->RTHeight;
 
 		D3D12_HEAP_PROPERTIES HeapProps = {};
 		HeapProps.Type = D3D12_HEAP_TYPE_READBACK;

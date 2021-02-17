@@ -280,13 +280,37 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.CBVUploadRandomFloatData = 0;
 		ShaderConfig.ResourceDeletionChance = 0.2f;
-		ShaderConfig.HeapDeletionChance = 0.2f;
+		ShaderConfig.HeapDeletionChance = 0;// 0.2f;
 		ShaderConfig.PlacedResourceChance = 0;// 0.3f;
+
+		ShaderConfig.ShouldReadbackImage = true;
+		ShaderConfig.ReadbackImageNamePrepend = "image_case_";
 
 		{
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);
-			ShaderConfig.AllowConservativeRasterization = (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
+			if (Desc.VendorId == 0x10DE)
+			{
+				ShaderConfig.ReadbackImageNameAppend = "_nvidia";
+			}
+			else if (Desc.VendorId == 0x8086)
+			{
+				ShaderConfig.ReadbackImageNameAppend = "_intel";
+			}
+			else if (Desc.VendorId == 0x1414)
+			{
+				ShaderConfig.ReadbackImageNameAppend = "_warp";
+			}
+			else
+			{
+				ASSERT(false && "I don't have any AMD cards to test on, feel free to write this code lol");
+			}
+		}
+
+		{
+			DXGI_ADAPTER_DESC Desc = {};
+			ChosenAdapter->GetDesc(&Desc);
+			ShaderConfig.AllowConservativeRasterization = false;// (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
 			ShaderConfig.LockMutexAroundExecCmdList = (Desc.VendorId == 0x1414 && Desc.DeviceId == 0x8C && !bIsSingleThreaded);
 		}
 
@@ -298,31 +322,20 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			LARGE_INTEGER PerfStart;
 			QueryPerformanceCounter(&PerfStart);
 			
-			const int32 TestCases = 1000;
+			const int32 TestCases = 100;
 
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;
-			SetupFuzzPersistState(&PersistState, Device);
-			
-			uint64 DebugTestCases[] = {
-				// Intel
-				14908923361117291,
-				14908923367228386,
-				14908923369325538
-			};
-
+			SetupFuzzPersistState(&PersistState, &ShaderConfig, Device);
 
 			// Single threaded
-			//for (int32 i = 0; i < ARRAY_COUNTOF(DebugTestCases); i++)
 			for (int32 i = 0; i < TestCases; i++)
 			{
 				ShaderFuzzingState Fuzzer;
 				Fuzzer.D3DDevice = Device;
 				Fuzzer.D3DPersist = &PersistState;
 				Fuzzer.Config = &ShaderConfig;
-			
-				//LOG("Doing round %d of fuzzing (%llu)...", i, DebugTestCases[i]);
-				//SetSeedOnFuzzer(&Fuzzer, DebugTestCases[i]);
+
 				LOG("Doing round %d of fuzzing...", i);
 				SetSeedOnFuzzer(&Fuzzer, i);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
@@ -351,7 +364,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 					D3DDrawingFuzzingPersistentState PersistState;
 					PersistState.ResourceMgr.D3DDevice = Device;
 					PersistState.ExecuteCommandListMutex = MutexPtr;
-					SetupFuzzPersistState(&PersistState, Device);
+					SetupFuzzPersistState(&PersistState, ConfigPtr, Device);
 
 					for (int32 i = 0; i < 128 * 1000; i++)
 					{

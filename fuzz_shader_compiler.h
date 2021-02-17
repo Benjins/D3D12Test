@@ -42,6 +42,21 @@ struct ShaderFuzzConfig
 	// If there are data races in command list execution, this can avoid them while still allowing some threading
 	byte LockMutexAroundExecCmdList = 0;
 
+	// If true, we copy the rendered images to a readback texture and spit them out to a file
+	byte ShouldReadbackImage = 0;
+
+	// If true, each case will clear the render target before rendering. Technically a modicum slower,
+	// but probably good overall since it makes readbacks mroe meaningful and exercises a bit more code
+	byte ShouldClearRTVBeforeCase = 1;
+
+	// We spit these out to a folder render_output, with a filename "{Prepend}{InitialFuzzSeed}{Append}.png"
+	const char* ReadbackImageNamePrepend = "image_";
+	const char* ReadbackImageNameAppend = "";
+
+	// The dimensions of the render target that we use
+	int32 RTWidth = 512;
+	int32 RTHeight = 512;
+
 	// 0 = do not delete resources (though they will be re-used once safe)
 	// 1 = delete all resources once used, do not re-use them
 	// anywhere in b/w 0 and 1 is the chance that a living resource will be destroyed at each iteration
@@ -53,6 +68,7 @@ struct ShaderFuzzConfig
 
 	// The chance that a given resource (right now only immutable textures) will be a placed resource instead of a committed one
 	float PlacedResourceChance = 0.3f;
+
 };
 
 struct ShaderFuzzingState : FuzzBasicState {
@@ -64,7 +80,7 @@ struct ShaderFuzzingState : FuzzBasicState {
 };
 
 
-void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ID3D12Device* Device);
+void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ShaderFuzzConfig* Config, ID3D12Device* Device);
 
 void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed);
 void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations);

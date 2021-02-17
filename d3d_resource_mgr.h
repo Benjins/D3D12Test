@@ -228,7 +228,12 @@ struct ResourceLifecycleManager
 		{
 			D3D12_HEAP_PROPERTIES Props = {};
 			Props.Type = (Desc.IsUploadHeap ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT);
-			HRESULT hr = D3DDevice->CreateCommittedResource(&Props, D3D12_HEAP_FLAG_NONE, &Desc.ResDesc, InitialState, nullptr, IID_PPV_ARGS(OutRes));
+			
+			D3D12_CLEAR_VALUE ClearValue = {};
+			ClearValue.Format = Desc.ResDesc.Format;
+			bool ShouldUseClearValue = !Desc.IsUploadHeap && (Desc.ResDesc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D) && (Desc.ResDesc.Flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL));
+
+			HRESULT hr = D3DDevice->CreateCommittedResource(&Props, D3D12_HEAP_FLAG_NONE, &Desc.ResDesc, InitialState, ShouldUseClearValue ? &ClearValue : nullptr, IID_PPV_ARGS(OutRes));
 			ASSERT(SUCCEEDED(hr));
 		}
 		else if (Desc.Type == ResourceType::Placed)
