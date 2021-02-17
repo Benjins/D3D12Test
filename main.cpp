@@ -48,7 +48,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 1;
+	int ChosenAdapterIndex = 0;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -280,12 +280,12 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.ForcePixelOutputAlphaToOne = 1;
 		ShaderConfig.CBVUploadRandomFloatData = 1;
-		ShaderConfig.ResourceDeletionChance = 0.2f;
-		ShaderConfig.HeapDeletionChance = 0;// 0.2f;
+		ShaderConfig.ResourceDeletionChance = 0.9f;
+		ShaderConfig.HeapDeletionChance = 0;// 0.4f;
 		ShaderConfig.PlacedResourceChance = 0;// 0.3f;
 
 		ShaderConfig.ShouldReadbackImage = true;
-		ShaderConfig.ReadbackImageNamePrepend = "image_case_cbvf_force_alpha_";
+		ShaderConfig.ReadbackImageNamePrepend = "image_case_";
 
 		{
 			DXGI_ADAPTER_DESC Desc = {};
