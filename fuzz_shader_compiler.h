@@ -18,6 +18,8 @@ struct D3DDrawingFuzzingPersistentState
 	ID3D12CommandQueue* CmdQueue = nullptr;
 	ID3D12Fence* ExecFence = nullptr;
 
+	ID3D12Resource* RTReadback = nullptr;
+
 	// Debugging tool if we find data races, so we can avoid them in the meantime
 	// Must be shared across threads, so...yeah
 	std::mutex* ExecuteCommandListMutex = nullptr;

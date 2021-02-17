@@ -20,8 +20,11 @@
 
 #include "d3d_resource_mgr.h"
 
+#include "stb_image_write.h"
+
 #include <assert.h>
 #include <unordered_map>
+
 
 // struct ShaderAST;
 // struct ShaderResource;
@@ -1542,6 +1545,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		const int32 RTHeight = 512;
 
 		// Create resources (including backbuffer?)
+		uint64 BackBufferResourceID = 0;
 		ID3D12Resource* BackBufferResource = nullptr;
 		std::vector<uint64> AllResourcesInUse;
 		std::unordered_map<uint64, int32> AllHeapsInUseAndCounts;
@@ -1557,7 +1561,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			BackBufferDesc.ResDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 			BackBufferDesc.ResDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 
-			uint64 BackBufferResourceID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(BackBufferDesc, &BackBufferResource);
+			BackBufferResourceID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(BackBufferDesc, &BackBufferResource);
 			AllResourcesInUse.push_back(BackBufferResourceID);
 
 			TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -1824,6 +1828,32 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		CommandList->ResolveQueryData(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0, 1, DestBuffer, 0);
 #endif
 
+		const bool bReadbackImage = true;
+
+		if (bReadbackImage)
+		{
+			ASSERT(Fuzzer->D3DPersist->RTReadback != nullptr);
+			
+			D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};
+			CopyLocDst.pResource = Fuzzer->D3DPersist->RTReadback;
+			CopyLocDst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+			CopyLocDst.PlacedFootprint.Offset = 0;
+			CopyLocDst.PlacedFootprint.Footprint.Width = RTWidth;
+			CopyLocDst.PlacedFootprint.Footprint.Height = RTHeight;
+			CopyLocDst.PlacedFootprint.Footprint.Depth = 1;
+			CopyLocDst.PlacedFootprint.Footprint.RowPitch = RTWidth * 4;
+			CopyLocDst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+
+			CopyLocSrc.pResource = BackBufferResource;
+			CopyLocSrc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			CopyLocSrc.SubresourceIndex = 0;
+
+			TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_COPY_SOURCE);
+			FlushResourceTransitions();
+
+			CommandList->CopyTextureRegion(&CopyLocDst, 0, 0, 0, &CopyLocSrc, nullptr);
+		}
+
 		CommandList->Close();
 
 		for (auto ResID : AllResourcesInUse)
@@ -1936,6 +1966,28 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		//LOG("Avg PS calls per fuzz case: %3.2f", PSCallsPerCase);
 #endif
 
+		if (bReadbackImage)
+		{
+			HANDLE hEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+			Fuzzer->D3DPersist->ExecFence->SetEventOnCompletion(ValueSignaled, hEvent);
+			WaitForSingleObject(hEvent, INFINITE);
+			CloseHandle(hEvent);
+
+			auto* RTReadback = Fuzzer->D3DPersist->RTReadback;
+			ASSERT(RTReadback != nullptr);
+			{
+				void* pPixelData = nullptr;
+				HRESULT hr = RTReadback->Map(0, nullptr, &pPixelData);
+				ASSERT(SUCCEEDED(hr));
+			
+				char filename[256] = {};
+				snprintf(filename, sizeof(filename), "../texture_output/rt_512_%llu_adapter2.png", Fuzzer->InitialFuzzSeed);
+				stbi_write_png(filename, RTWidth, RTHeight, 4, pPixelData, 0);
+			
+				RTReadback->Unmap(0, nullptr);
+			}
+		}
+
 
 		Fuzzer->D3DPersist->ExecFenceToSignal++;
 
@@ -1956,6 +2008,17 @@ void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ID3D12Devi
 	ASSERT(SUCCEEDED(Device->CreateCommandQueue(&CmdQueueDesc, IID_PPV_ARGS(&Persist->CmdQueue))));
 
 	ASSERT(SUCCEEDED(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Persist->ExecFence))));
+
+	{
+		const int32 RTWidth = 512;
+		const int32 RTHeight = 512;
+
+		D3D12_HEAP_PROPERTIES HeapProps = {};
+		HeapProps.Type = D3D12_HEAP_TYPE_READBACK;
+		D3D12_RESOURCE_DESC RenderReadbackResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(RTWidth * RTHeight * 4);
+		HRESULT hr = Device->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &RenderReadbackResourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&Persist->RTReadback));
+		ASSERT(SUCCEEDED(hr));
+	}
 }
 
 
