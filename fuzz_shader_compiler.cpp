@@ -655,7 +655,7 @@ void GenerateFuzzingShader(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderA
 
 #define AST_SOURCE_LIMIT (16 * 1024)
 
-void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNode* Node, StringBuffer* StrBuf)
+void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNode* Node, StringBuffer* StrBuf, ShaderFuzzConfig* Config)
 {
 	// TODO: Do Maybe cast construction w/ templates or w/e? Since we have the static type stuff
 	if (Node->Type == FuzzShaderASTNode::NodeType::Assignment)
@@ -663,7 +663,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 		auto* Assnmt = static_cast<FuzzShaderAssignment*>(Node);
 
 		StrBuf->AppendFormat("\t%s%s = ", (Assnmt->IsPredeclared ? "" : "float4 "), Assnmt->VariableName.c_str());
-		ConvertShaderASTNodeToSourceCode(ShaderAST, Assnmt->Value, StrBuf);
+		ConvertShaderASTNodeToSourceCode(ShaderAST, Assnmt->Value, StrBuf, Config);
 		StrBuf->AppendFormat(";\n");
 	}
 	else if (Node->Type == FuzzShaderASTNode::NodeType::BinaryOperator)
@@ -671,7 +671,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 		auto* Bin = static_cast<FuzzShaderBinaryOperator*>(Node);
 
 		StrBuf->AppendFormat("(");
-		ConvertShaderASTNodeToSourceCode(ShaderAST, Bin->LHS, StrBuf);
+		ConvertShaderASTNodeToSourceCode(ShaderAST, Bin->LHS, StrBuf, Config);
 
 		if (Bin->Op == FuzzShaderBinaryOperator::Operator::Add)
 		{
@@ -694,7 +694,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 			assert(false && "skjdfjk");
 		}
 
-		ConvertShaderASTNodeToSourceCode(ShaderAST, Bin->RHS, StrBuf);
+		ConvertShaderASTNodeToSourceCode(ShaderAST, Bin->RHS, StrBuf, Config);
 		StrBuf->AppendFormat(")");
 	}
 	else if (Node->Type == FuzzShaderASTNode::NodeType::TextureAccess)
@@ -703,7 +703,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 
 		// TODO: SampleLevel is required for vertex shader, but Sample() could be done in Pixel shaders
 		StrBuf->AppendFormat("(%s.SampleLevel(%s, (", Tex->TextureName.c_str(), Tex->SamplerName.c_str());
-		ConvertShaderASTNodeToSourceCode(ShaderAST, Tex->UV, StrBuf);
+		ConvertShaderASTNodeToSourceCode(ShaderAST, Tex->UV, StrBuf, Config);
 		StrBuf->Append(").xy, 0))");
 
 		//MyTexture.Sample(MySampler, UV)
@@ -736,7 +736,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 			{
 				StrBuf->Append(", ");
 			}
-			ConvertShaderASTNodeToSourceCode(ShaderAST, FuncCall->Arguments[i], StrBuf);
+			ConvertShaderASTNodeToSourceCode(ShaderAST, FuncCall->Arguments[i], StrBuf, Config);
 		}
 		StrBuf->Append(")");
 
@@ -770,12 +770,19 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 
 		for (auto Stmt : Block->Statements)
 		{
-			ConvertShaderASTNodeToSourceCode(ShaderAST, Stmt, StrBuf);
+			ConvertShaderASTNodeToSourceCode(ShaderAST, Stmt, StrBuf, Config);
 		}
 
 		// TODO: Should be in AST generation, not here
 		if (Node == ShaderAST->RootASTNode)
 		{
+			// TODO: This should really be in AST generation, though we can't handle non-float4 types
+			// I don't esp. like dragging the config in here... :/
+			if (ShaderAST->Type == D3DShaderType::Pixel && (Config->ForcePixelOutputAlphaToOne != 0))
+			{
+				StrBuf->Append("\tresult.a = 1.0f;\n");
+			}
+
 			StrBuf->AppendFormat("\treturn result;\n");
 		}
 
@@ -787,7 +794,7 @@ void ConvertShaderASTNodeToSourceCode(FuzzShaderAST* ShaderAST, FuzzShaderASTNod
 	}
 }
 
-void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
+void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST, ShaderFuzzConfig* Config)
 {
 	// TODO: Maybe move this to heap and make it dynamic, idk
 	StringBuffer StrBuf(1024 * 1024);
@@ -847,7 +854,7 @@ void ConvertShaderASTToSourceCode(FuzzShaderAST* ShaderAST)
 		assert(false && "afsdgf");
 	}
 
-	ConvertShaderASTNodeToSourceCode(ShaderAST, ShaderAST->RootASTNode, &StrBuf);
+	ConvertShaderASTNodeToSourceCode(ShaderAST, ShaderAST->RootASTNode, &StrBuf, Config);
 
 	StrBuf.Append("\n");
 
@@ -1491,8 +1498,8 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		GenerateFuzzingShader(Fuzzer, &VertShader);
 		GenerateFuzzingShader(Fuzzer, &PixelShader);
 
-		ConvertShaderASTToSourceCode(&VertShader);
-		ConvertShaderASTToSourceCode(&PixelShader);
+		ConvertShaderASTToSourceCode(&VertShader, Fuzzer->Config);
+		ConvertShaderASTToSourceCode(&PixelShader, Fuzzer->Config);
 
 		VerifyShaderCompilation(&VertShader);
 		VerifyShaderCompilation(&PixelShader);

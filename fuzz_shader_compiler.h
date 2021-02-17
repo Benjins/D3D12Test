@@ -33,6 +33,10 @@ struct ShaderFuzzConfig
 	// Make the vertex shader output more sensible position data
 	byte EnsureBetterPixelCoverage = 0;
 
+	// If true, the pixel shader will always output 1 for its alpha. Can make readbacks easier to visualise,
+	// at the cost of some blending stressing and other code paths
+	byte ForcePixelOutputAlphaToOne = 0;
+
 	// Can trip a bug in WARP (see repro case 1)
 	byte AllowConservativeRasterization = 0;
 
