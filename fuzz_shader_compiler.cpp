@@ -393,21 +393,23 @@ FuzzShaderBuiltinFuncInfo BuiltinShaderFuncInfo[] = {
 	{ "atan2", 2, 4},
 };
 
-FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderAST)
+FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzShaderAST* OutShaderAST, int32 CurrentDepth)
 {
 	float Decider = Fuzzer->GetFloat01();
 
-	if (Decider < 0.1)
+	const int32 MaxDepth = 8;
+
+	if (CurrentDepth < MaxDepth && Decider < 0.1)
 	{
 		// Binary Op
 		auto* BinaryOp = OutShaderAST->AllocateNode<FuzzShaderBinaryOperator>();
 		BinaryOp->Op = (FuzzShaderBinaryOperator::Operator)Fuzzer->GetIntInRange(0, (int32)FuzzShaderBinaryOperator::Operator::Count - 1);
-		BinaryOp->LHS = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
-		BinaryOp->RHS = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
+		BinaryOp->LHS = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST, CurrentDepth + 1);
+		BinaryOp->RHS = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST, CurrentDepth + 1);
 
 		return BinaryOp;
 	}
-	else if (Decider < 0.3)
+	else if (CurrentDepth < MaxDepth && Decider < 0.5)
 	{
 		// Func call
 		auto* FuncCall = OutShaderAST->AllocateNode<FuzzShaderFuncCall>();
@@ -420,21 +422,21 @@ FuzzShaderASTNode* GenerateFuzzingShaderValue(ShaderFuzzingState* Fuzzer, FuzzSh
 		FuncCall->OutputSize = BuiltinInfo->OutputSize;
 		for (int32 i = 0; i < BuiltinInfo->Arity; i++)
 		{
-			FuncCall->Arguments.push_back(GenerateFuzzingShaderValue(Fuzzer, OutShaderAST));
+			FuncCall->Arguments.push_back(GenerateFuzzingShaderValue(Fuzzer, OutShaderAST, CurrentDepth + 1));
 		}
 
 		return FuncCall;
 	}
-	else if (Decider < 0.5 && OutShaderAST->BoundTextures.size() > 0)
+	else if (CurrentDepth < MaxDepth && Decider < 0.6 && OutShaderAST->BoundTextures.size() > 0)
 	{
 		auto* Tex = OutShaderAST->AllocateNode<FuzzShaderTextureAccess>();
 		Tex->TextureName = OutShaderAST->BoundTextures[Fuzzer->GetIntInRange(0, OutShaderAST->BoundTextures.size() - 1)].ResourceName;
 		Tex->SamplerName = OutShaderAST->BoundTextures[Fuzzer->GetIntInRange(0, OutShaderAST->BoundTextures.size() - 1)].SamplerName;
-		Tex->UV = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
+		Tex->UV = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST, CurrentDepth + 1);
 
 		return Tex;
 	}
-	else if (Decider < 0.9 && OutShaderAST->GetNumVariablesInScope() > 0)
+	else if (Decider < 0.98 && OutShaderAST->GetNumVariablesInScope() > 0)
 	{
 		// Variable
 		auto* ReadVar = OutShaderAST->AllocateNode<FuzzShaderReadVariable>();
@@ -477,7 +479,7 @@ FuzzShaderAssignment* GenerateFuzzingShaderAssignment(ShaderFuzzingState* Fuzzer
 	auto* NewStmt = OutShaderAST->AllocateNode<FuzzShaderAssignment>();
 
 	NewStmt->VariableName = GetRandomShaderVariableName(Fuzzer, "tempvar");
-	NewStmt->Value = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST);
+	NewStmt->Value = GenerateFuzzingShaderValue(Fuzzer, OutShaderAST, 0);
 
 	OutShaderAST->VariablesInScope.back().emplace(NewStmt->VariableName, NewStmt);
 
@@ -1363,6 +1365,12 @@ void VerifyGraphicsPSOCompilation(ShaderFuzzingState* Fuzzer, FuzzShaderAST* Ver
 	PSODesc.PS = PixelShaderByteCode;
 	PSODesc.RasterizerState = GetFuzzRasterizerDesc(Fuzzer);
 	PSODesc.BlendState = GetFuzzBlendStateDesc(Fuzzer);
+
+	if (Fuzzer->Config->DisableBlendingState != 0)
+	{
+		PSODesc.BlendState = GetDefaultBlendStateDesc();
+	}
+
 	PSODesc.DepthStencilState.DepthEnable = FALSE;
 	PSODesc.DepthStencilState.StencilEnable = FALSE;
 	PSODesc.SampleMask = UINT_MAX;

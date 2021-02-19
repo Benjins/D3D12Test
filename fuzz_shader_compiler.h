@@ -37,6 +37,9 @@ struct ShaderFuzzConfig
 	// at the cost of some blending stressing and other code paths
 	byte ForcePixelOutputAlphaToOne = 0;
 
+	// If true, we won't use a random blend state, and will use the default non-blended one
+	byte DisableBlendingState = 0;
+
 	// Can trip a bug in WARP (see repro case 1)
 	byte AllowConservativeRasterization = 0;
 
