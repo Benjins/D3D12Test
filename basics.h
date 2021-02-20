@@ -4,8 +4,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
-#define ASSERT(cond) do { if (!(cond)) { char output[1024] = {}; snprintf(output, sizeof(output), "[%s:%d] Assertion failed '%s'\n", __FILE__, __LINE__, #cond); OutputDebugStringA(output); DebugBreak(); } } while(0)
+#define ASSERT(cond) do { if (!(cond)) { char output[256] = {}; snprintf(output, sizeof(output), "[%s:%d] Assertion failed '%s'\n", __FILE__, __LINE__, #cond); OutputDebugStringA(output); DebugBreak(); } } while(0)
 
 #define LOG(fmt, ...) do { char output[1024] = {}; snprintf(output, sizeof(output), fmt "\n", ## __VA_ARGS__); OutputDebugStringA(output); } while(0)
 
@@ -50,3 +51,29 @@ inline void ReadDataFromFile(const char* Filename, void** OutData, int32* OutSiz
 
 	fclose(f);
 }
+
+inline void ReadStringFromFile(const char* Filename, char** OutStr)
+{
+	FILE* f = NULL;
+	fopen_s(&f, Filename, "rb");
+
+	fseek(f, 0, SEEK_END);
+	int32 TotalSize = ftell(f);
+	fseek(f, 0, SEEK_SET);
+
+	char* FileData = (char*)malloc(TotalSize + 1);
+
+	fread(FileData, 1, TotalSize, f);
+
+	FileData[TotalSize] = '\0';
+
+	*OutStr = FileData;
+
+	fclose(f);
+}
+
+inline void WriteStringToFile(const char* Filename, const char* Str)
+{
+	WriteDataToFile(Filename, Str, strlen(Str));
+}
+

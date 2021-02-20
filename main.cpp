@@ -31,6 +31,8 @@
 #include "fuzz_dxbc.h"
 #include "d3d_resource_mgr.h"
 
+#include "re_dxbc.h"
+
 #pragma comment(lib, "D3D11.lib")
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "d3dcompiler.lib")
@@ -48,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 0;
+	int ChosenAdapterIndex = 2;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -274,11 +276,22 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
+		
+
+		SpitOutShaderInfo();
+
+		return 0;
+	}
+
+
+	//if (0)
+	{
 		bool bIsSingleThreaded = true;
 
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.ForcePixelOutputAlphaToOne = 1;
+		ShaderConfig.DisableBlendingState = 1;
 		ShaderConfig.CBVUploadRandomFloatData = 1;
 		ShaderConfig.ResourceDeletionChance = 0.9f;
 		ShaderConfig.HeapDeletionChance = 0;// 0.4f;
