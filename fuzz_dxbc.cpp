@@ -19,7 +19,207 @@ struct DXBCFileHeader
 	uint32 ChunkCount = 0;
 };
 
+static_assert(sizeof(DXBCFileHeader) == 32, "Check DXBCFileHeader alignment/size");
+
 #pragma pack(pop)
+
+
+// Substantial parts of this code were guided by reverse engineering, and using the code at https://github.com/tgjones/slimshader
+// as reference. The code at https://github.com/tgjones/slimshader is from Tim Jones, released under the MIT License
+
+// List adapted from https://github.com/tpn/winsdk-10/blob/master/Include/10.0.16299.0/um/d3d10TokenizedProgramFormat.hpp
+enum D3DOpcodeType
+{
+	D3DOpcodeType_Invalid = -1,
+	D3DOpcodeType_ADD = 0,
+	D3DOpcodeType_AND,
+	D3DOpcodeType_BREAK,
+	D3DOpcodeType_BREAKC,
+	D3DOpcodeType_CALL,
+	D3DOpcodeType_CALLC,
+	D3DOpcodeType_CASE,
+	D3DOpcodeType_CONTINUE,
+	D3DOpcodeType_CONTINUEC,
+	D3DOpcodeType_CUT,
+	D3DOpcodeType_DEFAULT,
+	D3DOpcodeType_DERIV_RTX,
+	D3DOpcodeType_DERIV_RTY,
+	D3DOpcodeType_DISCARD,
+	D3DOpcodeType_DIV,
+	D3DOpcodeType_DP2,
+	D3DOpcodeType_DP3,
+	D3DOpcodeType_DP4,
+	D3DOpcodeType_ELSE,
+	D3DOpcodeType_EMIT,
+	D3DOpcodeType_EMITTHENCUT,
+	D3DOpcodeType_ENDIF,
+	D3DOpcodeType_ENDLOOP,
+	D3DOpcodeType_ENDSWITCH,
+	D3DOpcodeType_EQ,
+	D3DOpcodeType_EXP,
+	D3DOpcodeType_FRC,
+	D3DOpcodeType_FTOI,
+	D3DOpcodeType_FTOU,
+	D3DOpcodeType_GE,
+	D3DOpcodeType_IADD,
+	D3DOpcodeType_IF,
+	D3DOpcodeType_IEQ,
+	D3DOpcodeType_IGE,
+	D3DOpcodeType_ILT,
+	D3DOpcodeType_IMAD,
+	D3DOpcodeType_IMAX,
+	D3DOpcodeType_IMIN,
+	D3DOpcodeType_IMUL,
+	D3DOpcodeType_INE,
+	D3DOpcodeType_INEG,
+	D3DOpcodeType_ISHL,
+	D3DOpcodeType_ISHR,
+	D3DOpcodeType_ITOF,
+	D3DOpcodeType_LABEL,
+	D3DOpcodeType_LD,
+	D3DOpcodeType_LD_MS,
+	D3DOpcodeType_LOG,
+	D3DOpcodeType_LOOP,
+	D3DOpcodeType_LT,
+	D3DOpcodeType_MAD,
+	D3DOpcodeType_MIN,
+	D3DOpcodeType_MAX,
+	D3DOpcodeType_CUSTOMDATA,
+	D3DOpcodeType_MOV,
+	D3DOpcodeType_MOVC,
+	D3DOpcodeType_MUL,
+	D3DOpcodeType_NE,
+	D3DOpcodeType_NOP,
+	D3DOpcodeType_NOT,
+	D3DOpcodeType_OR,
+	D3DOpcodeType_RESINFO,
+	D3DOpcodeType_RET,
+	D3DOpcodeType_RETC,
+	D3DOpcodeType_ROUND_NE,
+	D3DOpcodeType_ROUND_NI,
+	D3DOpcodeType_ROUND_PI,
+	D3DOpcodeType_ROUND_Z,
+	D3DOpcodeType_RSQ,
+	D3DOpcodeType_SAMPLE,
+	D3DOpcodeType_SAMPLE_C,
+	D3DOpcodeType_SAMPLE_C_LZ,
+	D3DOpcodeType_SAMPLE_L,
+	D3DOpcodeType_SAMPLE_D,
+	D3DOpcodeType_SAMPLE_B,
+	D3DOpcodeType_SQRT,
+	D3DOpcodeType_SWITCH,
+	D3DOpcodeType_SINCOS,
+	D3DOpcodeType_UDIV,
+	D3DOpcodeType_ULT,
+	D3DOpcodeType_UGE,
+	D3DOpcodeType_UMUL,
+	D3DOpcodeType_UMAD,
+	D3DOpcodeType_UMAX,
+	D3DOpcodeType_UMIN,
+	D3DOpcodeType_USHR,
+	D3DOpcodeType_UTOF,
+	D3DOpcodeType_XOR,
+	D3DOpcodeType_DCL_RESOURCE,
+	D3DOpcodeType_DCL_CONSTANT_BUFFER,
+	D3DOpcodeType_DCL_SAMPLER,
+	D3DOpcodeType_DCL_INDEX_RANGE,
+	D3DOpcodeType_DCL_GS_OUTPUT_PRIMITIVE_TOPOLOGY,
+	D3DOpcodeType_DCL_GS_INPUT_PRIMITIVE,
+	D3DOpcodeType_DCL_MAX_OUTPUT_VERTEX_COUNT,
+	D3DOpcodeType_DCL_INPUT,
+	D3DOpcodeType_DCL_INPUT_SGV,
+	D3DOpcodeType_DCL_INPUT_SIV,
+	D3DOpcodeType_DCL_INPUT_PS,
+	D3DOpcodeType_DCL_INPUT_PS_SGV,
+	D3DOpcodeType_DCL_INPUT_PS_SIV,
+	D3DOpcodeType_DCL_OUTPUT,
+	D3DOpcodeType_DCL_OUTPUT_SGV,
+	D3DOpcodeType_DCL_OUTPUT_SIV,
+	D3DOpcodeType_DCL_TEMPS,
+	D3DOpcodeType_DCL_INDEXABLE_TEMP,
+	D3DOpcodeType_DCL_GLOBAL_FLAGS,
+	D3DOpcodeType_RESERVED0,
+	D3DOpcodeType_NUM
+};
+
+
+enum OperandNumComponents {
+	OperandNumComponents_Zero,
+	OperandNumComponents_One,
+	OperandNumComponents_Four,
+	OperandNumComponents_Count,
+	// There's also N, but apparently not used atm
+};
+
+enum Operand4CompSelection {
+	Operand4CompSelection_Mask,
+	Operand4CompSelection_Swizzle,
+	Operand4CompSelection_Select,
+	Operand4CompSelection_Count,
+};
+
+enum OperandSourceType
+{
+	OperandSourceType_TempRegister,
+	OperandSourceType_InputRegister,
+	OperandSourceType_OutputRegister,
+	OperandSourceType_IndexableTempRegister,
+	OperandSourceType_Immediate32,
+	OperandSourceType_Immediate64,
+	OperandSourceType_Sampler,
+	OperandSourceType_Resource,
+	OperandSourceType_ConstantBuffer,
+	OperandSourceType_ImmediateConstantBuffer,
+	OperandSourceType_Label,
+	OperandSourceType_Count
+};
+
+enum OperandSourceIndexDimension
+{
+	OperandSourceIndexDimension_0D,
+	OperandSourceIndexDimension_1D,
+	OperandSourceIndexDimension_2D,
+	OperandSourceIndexDimension_3D,
+	OperandSourceIndexDimension_Count,
+};
+
+enum OperandSourceIndexRepr
+{
+	OperandSourceIndexRepr_Imm32,
+	OperandSourceIndexRepr_Imm64,
+	OperandSourceIndexRepr_Relative,
+	OperandSourceIndexRepr_RelativePlusImm32,
+	OperandSourceIndexRepr_RelativePlusImm64,
+	OperandSourceIndexRepr_Count,
+};
+
+struct D3DOpcode
+{
+	D3DOpcodeType Type = D3DOpcodeType_Invalid;
+	union
+	{
+		struct {
+			uint32 IsRefactoringAllowed : 1;
+			uint32 EnableDoublePrecision : 1;
+		} GlobalFlagsDecl;
+
+		struct {
+			OperandNumComponents NumComponents = OperandNumComponents_Zero;
+			Operand4CompSelection FourCompSelect = Operand4CompSelection_Mask;
+			uint8 CompMask = 0x0F;
+			uint8 CompSwizzle[4] = {0, 1, 2, 3};
+			OperandSourceType SrcType = OperandSourceType_TempRegister;
+			OperandSourceIndexDimension SrcDimension = OperandSourceIndexDimension_0D;
+			OperandSourceIndexRepr SrcIndicesRepr[4] = {};
+			uint64 SrcIndicesValues[4] = {};
+		} InputDeclaration;
+	};
+
+	D3DOpcode() { }
+};
+
+
+
 
 static_assert(sizeof(DXBCFileHeader) == 32, "Check packing on DXBCFileHeader");
 
@@ -29,6 +229,129 @@ inline T GetValueFromCursor(byte** Cursor)
 	T Val = *(T*)*Cursor;
 	(*Cursor) += sizeof(T);
 	return Val;
+}
+
+template<int Lo, int Hi, typename T = uint32>
+inline T GetBitsFromWord(uint32 Val)
+{
+	uint32 Mask = 0;
+
+	for (int32 i = Lo; i <= Hi; i++)
+	{
+		Mask |= (1 << i);
+	}
+
+	return (T)((Val & Mask) >> Lo);
+}
+
+template<typename T = uint32>
+inline T GetBitsFromWord(uint32 Val, int32 Lo, int32 Hi)
+{
+	uint32 Mask = 0;
+
+	for (int32 i = Lo; i <= Hi; i++)
+	{
+		Mask |= (1 << i);
+	}
+
+	return (T)((Val & Mask) >> Lo);
+}
+
+
+D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
+{
+	D3DOpcode OpCode;
+
+	byte* OrigCursor = *Cursor;
+
+	uint32 OpcodeStartDWORD = GetValueFromCursor<uint32>(Cursor);
+	uint32 OpCodeType = GetBitsFromWord<0, 10>(OpcodeStartDWORD);
+	uint32 OpCodeLength = GetBitsFromWord<24, 30>(OpcodeStartDWORD);
+	bool IsExtended = GetBitsFromWord<31, 31>(OpcodeStartDWORD) != 0;
+	ASSERT(!IsExtended);
+
+	OpCode.Type = (D3DOpcodeType)OpCodeType;
+
+	if (OpCodeType == D3DOpcodeType_DCL_GLOBAL_FLAGS)
+	{
+		OpCode.GlobalFlagsDecl.IsRefactoringAllowed = (OpcodeStartDWORD & (1 << 11)) != 0;
+		OpCode.GlobalFlagsDecl.EnableDoublePrecision = (OpcodeStartDWORD & (1 << 12)) != 0;
+	}
+	else if (OpCodeType == D3DOpcodeType_DCL_INPUT)
+	{
+		uint32 SecondDWORD = GetValueFromCursor<uint32>(Cursor);
+
+		OpCode.InputDeclaration.NumComponents = GetBitsFromWord<0, 1, OperandNumComponents>(SecondDWORD);
+
+		if (OpCode.InputDeclaration.NumComponents == OperandNumComponents_Four)
+		{
+			OpCode.InputDeclaration.FourCompSelect = GetBitsFromWord<2, 3, Operand4CompSelection>(SecondDWORD);
+
+			if (OpCode.InputDeclaration.FourCompSelect == Operand4CompSelection_Mask)
+			{
+				OpCode.InputDeclaration.CompMask = GetBitsFromWord<4, 7, uint8>(SecondDWORD);
+			}
+			else if (OpCode.InputDeclaration.FourCompSelect == Operand4CompSelection_Swizzle)
+			{
+				OpCode.InputDeclaration.CompSwizzle[0] = GetBitsFromWord<4,   5, uint8>(SecondDWORD);
+				OpCode.InputDeclaration.CompSwizzle[1] = GetBitsFromWord<6,   7, uint8>(SecondDWORD);
+				OpCode.InputDeclaration.CompSwizzle[2] = GetBitsFromWord<8,   9, uint8>(SecondDWORD);
+				OpCode.InputDeclaration.CompSwizzle[3] = GetBitsFromWord<10, 11, uint8>(SecondDWORD);
+			}
+			else if (OpCode.InputDeclaration.FourCompSelect == Operand4CompSelection_Swizzle)
+			{
+				for (int32 i = 0; i < 4; i++)
+				{
+					OpCode.InputDeclaration.CompSwizzle[i] = GetBitsFromWord<4, 5, uint8>(SecondDWORD);
+				}
+			}
+			else
+			{
+				ASSERT(false);
+			}
+		}
+
+		OpCode.InputDeclaration.SrcType = GetBitsFromWord<12, 19, OperandSourceType>(SecondDWORD);
+		OpCode.InputDeclaration.SrcDimension = GetBitsFromWord<20, 21, OperandSourceIndexDimension>(SecondDWORD);
+		for (int32 i = 0; i < (int32)OpCode.InputDeclaration.SrcDimension; i++)
+		{
+			OpCode.InputDeclaration.SrcIndicesRepr[i] = GetBitsFromWord<OperandSourceIndexRepr>(SecondDWORD, 22 + i * 3, 22 + i * 3 + 2);
+
+			if (OpCode.InputDeclaration.SrcIndicesRepr[i] == OperandSourceIndexRepr_Imm32)
+			{
+				OpCode.InputDeclaration.SrcIndicesValues[i] = GetValueFromCursor<uint32>(Cursor);
+			}
+			else if (OpCode.InputDeclaration.SrcIndicesRepr[i] == OperandSourceIndexRepr_Imm64)
+			{
+				OpCode.InputDeclaration.SrcIndicesValues[i] = GetValueFromCursor<uint64>(Cursor);
+			}
+			else
+			{
+				ASSERT(false);
+			}
+		}
+		
+		bool IsExtendedOperand = GetBitsFromWord<31, 31>(SecondDWORD) != 0;
+		ASSERT(!IsExtendedOperand);
+
+		ASSERT(false);
+	}
+	else if (OpCodeType == D3DOpcodeType_DCL_OUTPUT)
+	{
+
+	}
+	else if (OpCodeType == D3DOpcodeType_DCL_OUTPUT_SIV)
+	{
+
+	}
+	else
+	{
+		ASSERT(false);
+	}
+
+	ASSERT(*Cursor == OrigCursor + OpCodeLength * 4);
+
+	return OpCode;
 }
 
 void ParseDXBCCode(byte* Code, int32 Length)
@@ -197,11 +520,184 @@ void ParseDXBCCode(byte* Code, int32 Length)
 			uint16 ProgramType = GetValueFromCursor<uint16>(&ChunkCursor);
 			uint32 NumberDWORDs = GetValueFromCursor<uint32>(&ChunkCursor);
 
+			byte* OpcodesStart = ChunkCursor;
+
+			while (ChunkCursor < ChunkDataAfterHeader + (NumberDWORDs * 4))
+			{
+				D3DOpcode OpCode = GetD3DOpcodeFromCursor(&ChunkCursor);
+				(void)OpCode;
+			}
+
 			int xc = 0;
 			xc++;
 			(void)xc;
 		}
 	}
 }
+
+
+//
+// --------------------------------------
+//
+
+// Planning for an alternative means of generating bytecode
+
+struct FuzzGenerateD3DBytecodeState
+{
+	uint32 NumTempRegisters = 0;
+	uint32 TempRegisterClobberMask = 0;
+	uint32 NextWrittenTempRegister = 0;
+
+	std::vector<byte> OutputBytecode;
+};
+
+
+enum struct BytecodeRegisterType
+{
+	Temp,
+	Input,
+	Output,
+	Sampler,
+	Texture
+};
+
+struct BytecodeRegisterRef
+{
+	BytecodeRegisterType RegType = BytecodeRegisterType::Temp;
+	int32 RegIndex = 0;
+
+	static BytecodeRegisterRef Temp(int32 RegIndex) {
+		BytecodeRegisterRef ret;
+		ret.RegType = BytecodeRegisterType::Temp;
+		ret.RegIndex = RegIndex;
+		return ret;
+	}
+
+	static BytecodeRegisterRef Input(int32 RegIndex) {
+		BytecodeRegisterRef ret;
+		ret.RegType = BytecodeRegisterType::Input;
+		ret.RegIndex = RegIndex;
+		return ret;
+	}
+
+	static BytecodeRegisterRef Output(int32 RegIndex) {
+		BytecodeRegisterRef ret;
+		ret.RegType = BytecodeRegisterType::Output;
+		ret.RegIndex = RegIndex;
+		return ret;
+	}
+
+	static BytecodeRegisterRef Sampler(int32 RegIndex) {
+		BytecodeRegisterRef ret;
+		ret.RegType = BytecodeRegisterType::Sampler;
+		ret.RegIndex = RegIndex;
+		return ret;
+	}
+
+	static BytecodeRegisterRef Texture(int32 RegIndex) {
+		BytecodeRegisterRef ret;
+		ret.RegType = BytecodeRegisterType::Texture;
+		ret.RegIndex = RegIndex;
+		return ret;
+	}
+};
+
+struct BytecodeImmediateValue
+{
+	float Values[4] = {};
+};
+
+void ShaderDeclareGlobalFlags(FuzzGenerateD3DBytecodeState* Bytecode, bool isRefactoringAllowed)
+{
+
+}
+
+void ShaderDeclareInput(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, ShaderSemantic Semantic)
+{
+
+}
+
+void ShaderDeclareOutput(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, ShaderSemantic Semantic)
+{
+
+}
+
+void ShaderDeclareOutput_SIV(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, ShaderSemantic Semantic)
+{
+
+}
+
+void ShaderDeclareCBVImm(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, int32 SizeInBytes)
+{
+
+}
+
+void ShaderDeclareTextureResource(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex)
+{
+
+}
+
+void ShaderDeclareSampler(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex /*TODO: Mode?*/)
+{
+
+}
+
+void ShaderDoMov(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Src, BytecodeRegisterRef Dst)
+{
+
+}
+
+void ShaderAddImm(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Src1, BytecodeRegisterRef Src2, const BytecodeImmediateValue& Imm)
+{
+
+}
+
+void ShaderAddReg(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Src1, BytecodeRegisterRef Src2, BytecodeRegisterRef Dst)
+{
+
+}
+
+void ShaderMulImm(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Src1, BytecodeRegisterRef Src2, const BytecodeImmediateValue& Imm)
+{
+
+}
+
+void ShaderMulReg(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Src1, BytecodeRegisterRef Src2, BytecodeRegisterRef Dst)
+{
+
+}
+
+void ShaderSampleTextureLevel0(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Tex, BytecodeRegisterRef Sampler, BytecodeRegisterRef UVs, BytecodeRegisterRef Dst)
+{
+
+}
+
+void ShaderReturn(FuzzGenerateD3DBytecodeState* Bytecode)
+{
+	
+}
+
+
+// TODO: Also take fuzzing state
+// TODO: Also take shader description (resources, parameters, etc)
+void GenerateBytecode(FuzzGenerateD3DBytecodeState* Bytecode)
+{
+	Bytecode->NextWrittenTempRegister = 0;
+	Bytecode->TempRegisterClobberMask = 0;
+	Bytecode->OutputBytecode.clear();
+
+	// Blind reserve
+	Bytecode->OutputBytecode.reserve(1024);
+
+	int32 NumOpcodes = 0;
+
+	// Generate declarations
+
+	for (int32 OpcodeIndex = 0; OpcodeIndex < NumOpcodes; OpcodeIndex++)
+	{
+		// Generate an opcode
+	}
+}
+
 
 
