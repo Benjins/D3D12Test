@@ -193,8 +193,28 @@ enum OperandSourceIndexRepr
 	OperandSourceIndexRepr_Count,
 };
 
+// TODO: There are a lot more, but we're ignoring those for now
+enum OperandSemantic
+{
+	OperandSemantic_Undefined,
+	OperandSemantic_Position,
+	OperandSemantic_Count,
+};
+
 struct D3DOpcode
 {
+	struct IODecl
+	{
+		OperandNumComponents NumComponents = OperandNumComponents_Zero;
+		Operand4CompSelection FourCompSelect = Operand4CompSelection_Mask;
+		uint8 CompMask = 0x0F;
+		uint8 CompSwizzle[4] = { 0, 1, 2, 3 };
+		OperandSourceType SrcType = OperandSourceType_TempRegister;
+		OperandSourceIndexDimension SrcDimension = OperandSourceIndexDimension_0D;
+		OperandSourceIndexRepr SrcIndicesRepr[4] = {};
+		uint64 SrcIndicesValues[4] = {};
+	};
+
 	D3DOpcodeType Type = D3DOpcodeType_Invalid;
 	union
 	{
@@ -204,15 +224,17 @@ struct D3DOpcode
 		} GlobalFlagsDecl;
 
 		struct {
-			OperandNumComponents NumComponents = OperandNumComponents_Zero;
-			Operand4CompSelection FourCompSelect = Operand4CompSelection_Mask;
-			uint8 CompMask = 0x0F;
-			uint8 CompSwizzle[4] = {0, 1, 2, 3};
-			OperandSourceType SrcType = OperandSourceType_TempRegister;
-			OperandSourceIndexDimension SrcDimension = OperandSourceIndexDimension_0D;
-			OperandSourceIndexRepr SrcIndicesRepr[4] = {};
-			uint64 SrcIndicesValues[4] = {};
+			IODecl Decl;
 		} InputDeclaration;
+
+		struct {
+			IODecl Decl;
+		} OutputDeclaration;
+
+		struct {
+			IODecl Decl;
+			OperandSemantic Semantic;
+		} OutputDeclarationSIV;
 	};
 
 	D3DOpcode() { }
@@ -257,6 +279,67 @@ inline T GetBitsFromWord(uint32 Val, int32 Lo, int32 Hi)
 	return (T)((Val & Mask) >> Lo);
 }
 
+D3DOpcode::IODecl ParseIODeclFromCursor(byte** Cursor)
+{
+	uint32 SecondDWORD = GetValueFromCursor<uint32>(Cursor);
+
+	D3DOpcode::IODecl Decl;
+
+	Decl.NumComponents = GetBitsFromWord<0, 1, OperandNumComponents>(SecondDWORD);
+
+	if (Decl.NumComponents == OperandNumComponents_Four)
+	{
+		Decl.FourCompSelect = GetBitsFromWord<2, 3, Operand4CompSelection>(SecondDWORD);
+
+		if (Decl.FourCompSelect == Operand4CompSelection_Mask)
+		{
+			Decl.CompMask = GetBitsFromWord<4, 7, uint8>(SecondDWORD);
+		}
+		else if (Decl.FourCompSelect == Operand4CompSelection_Swizzle)
+		{
+			Decl.CompSwizzle[0] = GetBitsFromWord<4, 5, uint8>(SecondDWORD);
+			Decl.CompSwizzle[1] = GetBitsFromWord<6, 7, uint8>(SecondDWORD);
+			Decl.CompSwizzle[2] = GetBitsFromWord<8, 9, uint8>(SecondDWORD);
+			Decl.CompSwizzle[3] = GetBitsFromWord<10, 11, uint8>(SecondDWORD);
+		}
+		else if (Decl.FourCompSelect == Operand4CompSelection_Swizzle)
+		{
+			for (int32 i = 0; i < 4; i++)
+			{
+				Decl.CompSwizzle[i] = GetBitsFromWord<4, 5, uint8>(SecondDWORD);
+			}
+		}
+		else
+		{
+			ASSERT(false);
+		}
+	}
+
+	Decl.SrcType = GetBitsFromWord<12, 19, OperandSourceType>(SecondDWORD);
+	Decl.SrcDimension = GetBitsFromWord<20, 21, OperandSourceIndexDimension>(SecondDWORD);
+	for (int32 i = 0; i < (int32)Decl.SrcDimension; i++)
+	{
+		Decl.SrcIndicesRepr[i] = GetBitsFromWord<OperandSourceIndexRepr>(SecondDWORD, 22 + i * 3, 22 + i * 3 + 2);
+
+		if (Decl.SrcIndicesRepr[i] == OperandSourceIndexRepr_Imm32)
+		{
+			Decl.SrcIndicesValues[i] = GetValueFromCursor<uint32>(Cursor);
+		}
+		else if (Decl.SrcIndicesRepr[i] == OperandSourceIndexRepr_Imm64)
+		{
+			Decl.SrcIndicesValues[i] = GetValueFromCursor<uint64>(Cursor);
+		}
+		else
+		{
+			ASSERT(false);
+		}
+	}
+
+	bool IsExtendedOperand = GetBitsFromWord<31, 31>(SecondDWORD) != 0;
+	ASSERT(!IsExtendedOperand);
+
+	return Decl;
+}
 
 D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 {
@@ -279,70 +362,17 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 	}
 	else if (OpCodeType == D3DOpcodeType_DCL_INPUT)
 	{
-		uint32 SecondDWORD = GetValueFromCursor<uint32>(Cursor);
-
-		OpCode.InputDeclaration.NumComponents = GetBitsFromWord<0, 1, OperandNumComponents>(SecondDWORD);
-
-		if (OpCode.InputDeclaration.NumComponents == OperandNumComponents_Four)
-		{
-			OpCode.InputDeclaration.FourCompSelect = GetBitsFromWord<2, 3, Operand4CompSelection>(SecondDWORD);
-
-			if (OpCode.InputDeclaration.FourCompSelect == Operand4CompSelection_Mask)
-			{
-				OpCode.InputDeclaration.CompMask = GetBitsFromWord<4, 7, uint8>(SecondDWORD);
-			}
-			else if (OpCode.InputDeclaration.FourCompSelect == Operand4CompSelection_Swizzle)
-			{
-				OpCode.InputDeclaration.CompSwizzle[0] = GetBitsFromWord<4,   5, uint8>(SecondDWORD);
-				OpCode.InputDeclaration.CompSwizzle[1] = GetBitsFromWord<6,   7, uint8>(SecondDWORD);
-				OpCode.InputDeclaration.CompSwizzle[2] = GetBitsFromWord<8,   9, uint8>(SecondDWORD);
-				OpCode.InputDeclaration.CompSwizzle[3] = GetBitsFromWord<10, 11, uint8>(SecondDWORD);
-			}
-			else if (OpCode.InputDeclaration.FourCompSelect == Operand4CompSelection_Swizzle)
-			{
-				for (int32 i = 0; i < 4; i++)
-				{
-					OpCode.InputDeclaration.CompSwizzle[i] = GetBitsFromWord<4, 5, uint8>(SecondDWORD);
-				}
-			}
-			else
-			{
-				ASSERT(false);
-			}
-		}
-
-		OpCode.InputDeclaration.SrcType = GetBitsFromWord<12, 19, OperandSourceType>(SecondDWORD);
-		OpCode.InputDeclaration.SrcDimension = GetBitsFromWord<20, 21, OperandSourceIndexDimension>(SecondDWORD);
-		for (int32 i = 0; i < (int32)OpCode.InputDeclaration.SrcDimension; i++)
-		{
-			OpCode.InputDeclaration.SrcIndicesRepr[i] = GetBitsFromWord<OperandSourceIndexRepr>(SecondDWORD, 22 + i * 3, 22 + i * 3 + 2);
-
-			if (OpCode.InputDeclaration.SrcIndicesRepr[i] == OperandSourceIndexRepr_Imm32)
-			{
-				OpCode.InputDeclaration.SrcIndicesValues[i] = GetValueFromCursor<uint32>(Cursor);
-			}
-			else if (OpCode.InputDeclaration.SrcIndicesRepr[i] == OperandSourceIndexRepr_Imm64)
-			{
-				OpCode.InputDeclaration.SrcIndicesValues[i] = GetValueFromCursor<uint64>(Cursor);
-			}
-			else
-			{
-				ASSERT(false);
-			}
-		}
-		
-		bool IsExtendedOperand = GetBitsFromWord<31, 31>(SecondDWORD) != 0;
-		ASSERT(!IsExtendedOperand);
-
-		ASSERT(false);
+		OpCode.InputDeclaration.Decl = ParseIODeclFromCursor(Cursor);
 	}
 	else if (OpCodeType == D3DOpcodeType_DCL_OUTPUT)
 	{
-
+		OpCode.OutputDeclaration.Decl = ParseIODeclFromCursor(Cursor);
 	}
 	else if (OpCodeType == D3DOpcodeType_DCL_OUTPUT_SIV)
 	{
-
+		OpCode.OutputDeclarationSIV.Decl = ParseIODeclFromCursor(Cursor);
+		uint32 SemanticDWORD = GetValueFromCursor<uint32>(Cursor);
+		OpCode.OutputDeclarationSIV.Semantic = GetBitsFromWord<0, 15, OperandSemantic>(SemanticDWORD);
 	}
 	else
 	{
