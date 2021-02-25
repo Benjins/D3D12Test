@@ -213,6 +213,7 @@ struct D3DOpcode
 		OperandSourceIndexDimension SrcDimension = OperandSourceIndexDimension_0D;
 		OperandSourceIndexRepr SrcIndicesRepr[4] = {};
 		uint64 SrcIndicesValues[4] = {};
+		double ImmediateValues[4] = {};
 	};
 
 	D3DOpcodeType Type = D3DOpcodeType_Invalid;
@@ -235,12 +236,22 @@ struct D3DOpcode
 			IODecl Decl;
 			OperandSemantic Semantic;
 		} OutputDeclarationSIV;
+
+		struct {
+			IODecl Output;
+			IODecl Src1;
+			IODecl Src2;
+		} BinaryGeneralOp;
 	};
 
 	D3DOpcode() { }
 };
 
 
+inline bool IsOpcodeGenericBinaryOp(D3DOpcodeType OpcodeType)
+{
+	return (OpcodeType == D3DOpcodeType_ADD) || (OpcodeType == D3DOpcodeType_MUL);
+}
 
 
 static_assert(sizeof(DXBCFileHeader) == 32, "Check packing on DXBCFileHeader");
@@ -335,6 +346,39 @@ D3DOpcode::IODecl ParseIODeclFromCursor(byte** Cursor)
 		}
 	}
 
+	int32 NumComps = 0;
+	if (Decl.NumComponents == OperandNumComponents_Zero)
+	{
+		NumComps = 0;
+	}
+	else if (Decl.NumComponents == OperandNumComponents_One)
+	{
+		NumComps = 1;
+	}
+	else if (Decl.NumComponents == OperandNumComponents_Four)
+	{
+		NumComps = 4;
+	}
+	else
+	{
+		ASSERT(false);
+	}
+
+	if (Decl.SrcType == OperandSourceType_Immediate32)
+	{
+		for (int32 CompIdx = 0; CompIdx < NumComps; CompIdx++)
+		{
+			Decl.ImmediateValues[CompIdx] = GetValueFromCursor<float>(Cursor);
+		}
+	}
+	else if (Decl.SrcType == OperandSourceType_Immediate64)
+	{
+		for (int32 CompIdx = 0; CompIdx < NumComps; CompIdx++)
+		{
+			Decl.ImmediateValues[CompIdx] = GetValueFromCursor<double>(Cursor);
+		}
+	}
+
 	bool IsExtendedOperand = GetBitsFromWord<31, 31>(SecondDWORD) != 0;
 	ASSERT(!IsExtendedOperand);
 
@@ -355,24 +399,34 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 
 	OpCode.Type = (D3DOpcodeType)OpCodeType;
 
-	if (OpCodeType == D3DOpcodeType_DCL_GLOBAL_FLAGS)
+	if (OpCode.Type == D3DOpcodeType_DCL_GLOBAL_FLAGS)
 	{
-		OpCode.GlobalFlagsDecl.IsRefactoringAllowed = (OpcodeStartDWORD & (1 << 11)) != 0;
-		OpCode.GlobalFlagsDecl.EnableDoublePrecision = (OpcodeStartDWORD & (1 << 12)) != 0;
+		OpCode.GlobalFlagsDecl.IsRefactoringAllowed = GetBitsFromWord<11, 11>(OpcodeStartDWORD) != 0;
+		OpCode.GlobalFlagsDecl.EnableDoublePrecision = GetBitsFromWord<12, 12>(OpcodeStartDWORD) != 0;
 	}
-	else if (OpCodeType == D3DOpcodeType_DCL_INPUT)
+	else if (OpCode.Type == D3DOpcodeType_DCL_INPUT)
 	{
 		OpCode.InputDeclaration.Decl = ParseIODeclFromCursor(Cursor);
 	}
-	else if (OpCodeType == D3DOpcodeType_DCL_OUTPUT)
+	else if (OpCode.Type == D3DOpcodeType_DCL_OUTPUT)
 	{
 		OpCode.OutputDeclaration.Decl = ParseIODeclFromCursor(Cursor);
 	}
-	else if (OpCodeType == D3DOpcodeType_DCL_OUTPUT_SIV)
+	else if (OpCode.Type == D3DOpcodeType_DCL_OUTPUT_SIV)
 	{
 		OpCode.OutputDeclarationSIV.Decl = ParseIODeclFromCursor(Cursor);
 		uint32 SemanticDWORD = GetValueFromCursor<uint32>(Cursor);
 		OpCode.OutputDeclarationSIV.Semantic = GetBitsFromWord<0, 15, OperandSemantic>(SemanticDWORD);
+	}
+	else if (IsOpcodeGenericBinaryOp(OpCode.Type))
+	{
+		OpCode.BinaryGeneralOp.Output = ParseIODeclFromCursor(Cursor);
+		OpCode.BinaryGeneralOp.Src1 = ParseIODeclFromCursor(Cursor);
+		OpCode.BinaryGeneralOp.Src2 = ParseIODeclFromCursor(Cursor);
+	}
+	else if (OpCodeType == D3DOpcodeType_RET)
+	{
+		// Nothing
 	}
 	else
 	{
@@ -572,6 +626,8 @@ void ParseDXBCCode(byte* Code, int32 Length)
 
 // Planning for an alternative means of generating bytecode
 
+// TODO: Rename bytecode to opcodes? Bytecode includes metadata and other chunks
+
 struct FuzzGenerateD3DBytecodeState
 {
 	uint32 NumTempRegisters = 0;
@@ -683,6 +739,11 @@ void ShaderAddImm(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Sr
 }
 
 void ShaderAddReg(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Src1, BytecodeRegisterRef Src2, BytecodeRegisterRef Dst)
+{
+
+}
+
+void ShaderFmadReg(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef AddSrc, BytecodeRegisterRef MulSrc1, BytecodeRegisterRef MulSrc2, BytecodeRegisterRef Dst)
 {
 
 }
