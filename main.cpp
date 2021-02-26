@@ -268,7 +268,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		//const char* ExampleShaderFilename = "../dxbc_re/vs_plain_mul_bytecode.bin";
 		//const char* ExampleShaderFilename = "../dxbc_re/vs_plain_bytecode.bin";
 		//const char* ExampleShaderFilename = "../dxbc_re/vs_plain_cbv1_bytecode.bin";
-		const char* ExampleShaderFilename = "../dxbc_re/vs_plain_cbv3_bytecode.bin";
+		//const char* ExampleShaderFilename = "../dxbc_re/vs_plain_tex1_bytecode.bin";
+		const char* ExampleShaderFilename = "../dxbc_re/vs_plain_tex_sample_bytecode.bin";
 
 		void* FileData = nullptr;
 		int32 FileSize = 0;

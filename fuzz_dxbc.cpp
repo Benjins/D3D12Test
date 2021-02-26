@@ -201,6 +201,40 @@ enum OperandSemantic
 	OperandSemantic_Count,
 };
 
+enum SamplerMode {
+	SamplerMode_Default,
+	SamplerMode_Comparison,
+	SamplerMode_Mono
+};
+
+enum ResourceDimension {
+	ResourceDimension_Unknown,
+	ResourceDimension_Buffer,
+	ResourceDimension_Texture1D,
+	ResourceDimension_Texture2D,
+	ResourceDimension_Texture2D_MultiSample,
+	ResourceDimension_Texture3D,
+	ResourceDimension_TextureCube,
+	ResourceDimension_Texture1DArray,
+	ResourceDimension_Texture2DArray,
+	ResourceDimension_Texture2DArray_MultiSample,
+	ResourceDimension_TextureCubeArray,
+	ResourceDimension_RawBuffer,
+	ResourceDimension_StructuredBuffer,
+};
+
+enum ResourceReturnType {
+	ResourceReturnType_NA,
+	ResourceReturnType_Unorm,
+	ResourceReturnType_Snorm,
+	ResourceReturnType_SInt,
+	ResourceReturnType_UInt,
+	ResourceReturnType_Float,
+	ResourceReturnType_Mixed,
+	ResourceReturnType_Double,
+	ResourceReturnType_Continued,
+};
+
 struct D3DOpcode
 {
 	struct IODecl
@@ -246,6 +280,18 @@ struct D3DOpcode
 		struct {
 			int32 NumTemps;
 		} TempRegistersDeclaration;
+
+		struct {
+			int32 SamplerRegister;
+			SamplerMode SamplerMode;
+		} SamplerDeclaration;
+
+		struct {
+			int32 TextureRegIndex;
+			int32 SampleCount;
+			ResourceDimension Dimension;
+			ResourceReturnType ReturnType[4];
+		} ResourceDeclaration;
 
 		struct {
 			IODecl Output;
@@ -461,6 +507,32 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		ASSERT(Decl.SrcDimension == OperandSourceIndexDimension_2D);
 		OpCode.CBVDeclaration.CBVRegIndex = (uint32)Decl.SrcIndicesValues[0];
 		OpCode.CBVDeclaration.CBVSize = (uint32)Decl.SrcIndicesValues[1];
+	}
+	else if (OpCode.Type == D3DOpcodeType_DCL_SAMPLER)
+	{
+		OpCode.SamplerDeclaration.SamplerMode = GetBitsFromWord<11, 14, SamplerMode>(OpcodeStartDWORD);
+		auto Decl = ParseIODeclFromCursor(Cursor);
+		ASSERT(Decl.SrcDimension == OperandSourceIndexDimension_1D);
+		OpCode.SamplerDeclaration.SamplerRegister = (uint32)Decl.SrcIndicesValues[0];
+	}
+	else if (OpCode.Type == D3DOpcodeType_DCL_RESOURCE)
+	{
+		ResourceDimension ResDim = GetBitsFromWord<11, 15, ResourceDimension>(OpcodeStartDWORD);
+		uint32 SampleCount = GetBitsFromWord<16, 22>(OpcodeStartDWORD);
+		ASSERT(SampleCount == 0 || SampleCount == 1);
+
+		auto Decl = ParseIODeclFromCursor(Cursor);
+		ASSERT(Decl.SrcDimension == OperandSourceIndexDimension_1D);
+
+		OpCode.ResourceDeclaration.TextureRegIndex = (uint32)Decl.SrcIndicesValues[0];
+		OpCode.ResourceDeclaration.Dimension = ResDim;
+		OpCode.ResourceDeclaration.SampleCount = SampleCount;
+
+		uint32 ReturnTypeDWORD = GetValueFromCursor<uint32>(Cursor);
+		for (int32 i = 0; i < 4; i++)
+		{
+			OpCode.ResourceDeclaration.ReturnType[i] = GetBitsFromWord<ResourceReturnType>(ReturnTypeDWORD, 4 * i, 4 * i + 3);
+		}
 	}
 	else if (IsOpcodeGenericTernaryOp(OpCode.Type))
 	{
