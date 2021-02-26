@@ -238,6 +238,23 @@ struct D3DOpcode
 		} OutputDeclarationSIV;
 
 		struct {
+			bool IsDynamicIndexed;
+			int32 CBVRegIndex;
+			int32 CBVSize;
+		} CBVDeclaration;
+
+		struct {
+			int32 NumTemps;
+		} TempRegistersDeclaration;
+
+		struct {
+			IODecl Output;
+			IODecl Src1;
+			IODecl Src2;
+			IODecl Src3;
+		} TernaryGeneralOp;
+
+		struct {
 			IODecl Output;
 			IODecl Src1;
 			IODecl Src2;
@@ -252,6 +269,11 @@ struct D3DOpcode
 	D3DOpcode() { }
 };
 
+
+inline bool IsOpcodeGenericTernaryOp(D3DOpcodeType OpcodeType)
+{
+	return (OpcodeType == D3DOpcodeType_MAD);
+}
 
 inline bool IsOpcodeGenericBinaryOp(D3DOpcodeType OpcodeType)
 {
@@ -427,6 +449,25 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		OpCode.OutputDeclarationSIV.Decl = ParseIODeclFromCursor(Cursor);
 		uint32 SemanticDWORD = GetValueFromCursor<uint32>(Cursor);
 		OpCode.OutputDeclarationSIV.Semantic = GetBitsFromWord<0, 15, OperandSemantic>(SemanticDWORD);
+	}
+	else if (OpCode.Type == D3DOpcodeType_DCL_TEMPS)
+	{
+		OpCode.TempRegistersDeclaration.NumTemps = GetValueFromCursor<uint32>(Cursor);
+	}
+	else if (OpCode.Type == D3DOpcodeType_DCL_CONSTANT_BUFFER)
+	{
+		OpCode.CBVDeclaration.IsDynamicIndexed = GetBitsFromWord<11, 11>(OpcodeStartDWORD) != 0;
+		auto Decl = ParseIODeclFromCursor(Cursor);
+		ASSERT(Decl.SrcDimension == OperandSourceIndexDimension_2D);
+		OpCode.CBVDeclaration.CBVRegIndex = (uint32)Decl.SrcIndicesValues[0];
+		OpCode.CBVDeclaration.CBVSize = (uint32)Decl.SrcIndicesValues[1];
+	}
+	else if (IsOpcodeGenericTernaryOp(OpCode.Type))
+	{
+		OpCode.TernaryGeneralOp.Output = ParseIODeclFromCursor(Cursor);
+		OpCode.TernaryGeneralOp.Src1 = ParseIODeclFromCursor(Cursor);
+		OpCode.TernaryGeneralOp.Src2 = ParseIODeclFromCursor(Cursor);
+		OpCode.TernaryGeneralOp.Src3 = ParseIODeclFromCursor(Cursor);
 	}
 	else if (IsOpcodeGenericBinaryOp(OpCode.Type))
 	{
