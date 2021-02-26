@@ -242,6 +242,11 @@ struct D3DOpcode
 			IODecl Src1;
 			IODecl Src2;
 		} BinaryGeneralOp;
+
+		struct {
+			IODecl Output;
+			IODecl Src;
+		} UnaryGeneralOp;
 	};
 
 	D3DOpcode() { }
@@ -251,6 +256,11 @@ struct D3DOpcode
 inline bool IsOpcodeGenericBinaryOp(D3DOpcodeType OpcodeType)
 {
 	return (OpcodeType == D3DOpcodeType_ADD) || (OpcodeType == D3DOpcodeType_MUL);
+}
+
+inline bool IsOpcodeGenericUnaryOp(D3DOpcodeType OpcodeType)
+{
+	return (OpcodeType == D3DOpcodeType_MOV);
 }
 
 
@@ -423,6 +433,12 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		OpCode.BinaryGeneralOp.Output = ParseIODeclFromCursor(Cursor);
 		OpCode.BinaryGeneralOp.Src1 = ParseIODeclFromCursor(Cursor);
 		OpCode.BinaryGeneralOp.Src2 = ParseIODeclFromCursor(Cursor);
+	}
+	else if (IsOpcodeGenericUnaryOp(OpCode.Type))
+	{
+
+		OpCode.UnaryGeneralOp.Output = ParseIODeclFromCursor(Cursor);
+		OpCode.UnaryGeneralOp.Src = ParseIODeclFromCursor(Cursor);
 	}
 	else if (OpCodeType == D3DOpcodeType_RET)
 	{

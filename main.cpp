@@ -265,7 +265,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	{
 		//const char* ExampleShaderFilename = "../example_shaders/9795564935892538031_pixel.dxbc";
 		//const char* ExampleShaderFilename = "../dxbc_re/vs_plain_add_bytecode.bin";
-		const char* ExampleShaderFilename = "../dxbc_re/vs_plain_mul_bytecode.bin";
+		//const char* ExampleShaderFilename = "../dxbc_re/vs_plain_mul_bytecode.bin";
+		const char* ExampleShaderFilename = "../dxbc_re/vs_plain_bytecode.bin";
 
 		void* FileData = nullptr;
 		int32 FileSize = 0;
