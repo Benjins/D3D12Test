@@ -235,6 +235,14 @@ enum ResourceReturnType {
 	ResourceReturnType_Continued,
 };
 
+enum OpcodeExtensionType
+{
+	OpcodeExtensionType_None,
+	OpcodeExtensionType_SampleControls,
+	OpcodeExtensionType_ResourceDim,
+	OpcodeExtensionType_ResourceReturnType
+};
+
 struct D3DOpcode
 {
 	struct IODecl
@@ -285,6 +293,17 @@ struct D3DOpcode
 			int32 SamplerRegister;
 			SamplerMode SamplerMode;
 		} SamplerDeclaration;
+
+		struct {
+			IODecl OutputReg;
+			IODecl UVReg;
+			IODecl TextureReg;
+			IODecl SamplerReg;
+			IODecl MipLevel;
+			ResourceReturnType ReturnType[4];
+			ResourceDimension Dimension;
+			int32 ResourceStride; // Usually 0?
+		} SampleLOp;
 
 		struct {
 			int32 TextureRegIndex;
@@ -458,7 +477,13 @@ D3DOpcode::IODecl ParseIODeclFromCursor(byte** Cursor)
 	}
 
 	bool IsExtendedOperand = GetBitsFromWord<31, 31>(SecondDWORD) != 0;
-	ASSERT(!IsExtendedOperand);
+	//ASSERT(!IsExtendedOperand);
+
+	if (IsExtendedOperand)
+	{
+		// TODO:
+		GetValueFromCursor<uint32>(Cursor);
+	}
 
 	return Decl;
 }
@@ -473,9 +498,13 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 	uint32 OpCodeType = GetBitsFromWord<0, 10>(OpcodeStartDWORD);
 	uint32 OpCodeLength = GetBitsFromWord<24, 30>(OpcodeStartDWORD);
 	bool IsExtended = GetBitsFromWord<31, 31>(OpcodeStartDWORD) != 0;
-	ASSERT(!IsExtended);
 
 	OpCode.Type = (D3DOpcodeType)OpCodeType;
+
+	if (OpCode.Type != D3DOpcodeType_SAMPLE_L)
+	{
+		ASSERT(!IsExtended);
+	}
 
 	if (OpCode.Type == D3DOpcodeType_DCL_GLOBAL_FLAGS)
 	{
@@ -553,7 +582,38 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		OpCode.UnaryGeneralOp.Output = ParseIODeclFromCursor(Cursor);
 		OpCode.UnaryGeneralOp.Src = ParseIODeclFromCursor(Cursor);
 	}
-	else if (OpCodeType == D3DOpcodeType_RET)
+	else if (OpCode.Type == D3DOpcodeType_SAMPLE_L)
+	{
+		uint32 SecondDWORD = GetValueFromCursor<uint32>(Cursor);
+		uint32 ThirdDWORD = GetValueFromCursor<uint32>(Cursor);
+
+		ASSERT(IsExtended);
+		ASSERT((GetBitsFromWord<31, 31>(SecondDWORD) != 0));
+		ASSERT((GetBitsFromWord<31, 31>(ThirdDWORD) == 0));
+
+		auto SecondExtensionType = GetBitsFromWord<0, 5, OpcodeExtensionType>(SecondDWORD);
+		auto ThirdExtensionType = GetBitsFromWord<0, 5, OpcodeExtensionType>(ThirdDWORD);
+
+		ASSERT(SecondExtensionType == OpcodeExtensionType_ResourceDim);
+		ASSERT(ThirdExtensionType == OpcodeExtensionType_ResourceReturnType);
+
+		OpCode.SampleLOp.Dimension = GetBitsFromWord<6, 10, ResourceDimension>(SecondDWORD);
+		OpCode.SampleLOp.ResourceStride = GetBitsFromWord<11, 15>(SecondDWORD);
+
+		ResourceReturnType RetTypes[4] = {};
+		for (int32 i = 0; i < 4; i++)
+		{
+			OpCode.SampleLOp.ReturnType[i] = GetBitsFromWord<ResourceReturnType>(ThirdDWORD, 6 + 4 * i, 9 + 4 * i);
+		}
+
+		//auto Decl1 = ParseIODeclFromCursor(Cursor);
+		OpCode.SampleLOp.OutputReg = ParseIODeclFromCursor(Cursor);
+		OpCode.SampleLOp.UVReg = ParseIODeclFromCursor(Cursor);
+		OpCode.SampleLOp.TextureReg = ParseIODeclFromCursor(Cursor);
+		OpCode.SampleLOp.SamplerReg = ParseIODeclFromCursor(Cursor);
+		OpCode.SampleLOp.MipLevel = ParseIODeclFromCursor(Cursor);
+	}
+	else if (OpCode.Type == D3DOpcodeType_RET)
 	{
 		// Nothing
 	}
