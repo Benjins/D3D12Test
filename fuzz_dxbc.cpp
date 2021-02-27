@@ -612,6 +612,8 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		OpCode.SampleLOp.TextureReg = ParseIODeclFromCursor(Cursor);
 		OpCode.SampleLOp.SamplerReg = ParseIODeclFromCursor(Cursor);
 		OpCode.SampleLOp.MipLevel = ParseIODeclFromCursor(Cursor);
+
+		ASSERT(false);
 	}
 	else if (OpCode.Type == D3DOpcodeType_RET)
 	{

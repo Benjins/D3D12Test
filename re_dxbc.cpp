@@ -81,9 +81,27 @@ void SpitOutShaderInfo()
 	//	SpitOutShaderInfoFor("vs_plain_cbv3", VSPlain, D3DShaderType::Vertex);
 	//}
 
+	//{
+	//	const char* VSPlain = "struct PSInput { float4 pos : SV_POSITION; };\nTexture2D tex_6;\nSamplerState sampler_6;\nPSInput Main(float4 pos : POSITION) {\nPSInput res;\nres.pos = pos + tex_6.SampleLevel(sampler_6, pos.xy, 0);\nreturn res;\n}";
+	//	SpitOutShaderInfoFor("vs_plain_tex_sample", VSPlain, D3DShaderType::Vertex);
+	//}
+
+	//{
+	//	const char* VSPlain = "struct PSInput { float4 pos : SV_POSITION;  float2 uvs : TEXCOORD; };\n"
+	//		"Texture2D tex_1; SamplerState sampler_1;\n"
+	//		"Texture2D tex_2; SamplerState sampler_2;\n"
+	//		"PSInput Main(float4 pos : POSITION, float2 uvs : TEXCOORD) {\n"
+	//		"PSInput res;\n"
+	//		"res.pos = pos + tex_1.SampleLevel(sampler_1, pos.xy, 1.5) + tex_1.SampleLevel(sampler_2,  tex_2.SampleLevel(sampler_2, uvs, 0), 0);\n"
+	//		"res.uvs = uvs;\n"
+	//		"\nreturn res;\n"
+	//	"}";
+	//	SpitOutShaderInfoFor("vs_plain_tex_sample_2", VSPlain, D3DShaderType::Vertex);
+	//}
+
 	{
-		const char* VSPlain = "struct PSInput { float4 pos : SV_POSITION; };\nTexture2D tex_6;\nSamplerState sampler_6;\nPSInput Main(float4 pos : POSITION) {\nPSInput res;\nres.pos = pos + tex_6.SampleLevel(sampler_6, pos.xy, 0);\nreturn res;\n}";
-		SpitOutShaderInfoFor("vs_plain_tex_sample", VSPlain, D3DShaderType::Vertex);
+		const char* PSPlain = "struct PSInput { float4 pos : SV_POSITION; };float4 Main(PSInput input) : SV_TARGET { return float4(1.0,1.0,1.0,1.0); }";
+		SpitOutShaderInfoFor("ps_plain", PSPlain, D3DShaderType::Pixel);
 	}
 }
 
