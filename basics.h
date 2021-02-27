@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <vector>
+
 #define ASSERT(cond) do { if (!(cond)) { char output[256] = {}; snprintf(output, sizeof(output), "[%s:%d] Assertion failed '%s'\n", __FILE__, __LINE__, #cond); OutputDebugStringA(output); DebugBreak(); } } while(0)
 
 #define LOG(fmt, ...) do { char output[1024] = {}; snprintf(output, sizeof(output), fmt "\n", ## __VA_ARGS__); OutputDebugStringA(output); } while(0)
