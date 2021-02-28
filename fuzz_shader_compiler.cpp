@@ -1491,6 +1491,398 @@ void CopyTextureResource(ID3D12GraphicsCommandList* CommandList, ID3D12Resource*
 uint64 TotalPSCalls = 0;
 uint64 TotalFuzzCases = 0;
 
+void GenerateDrawingCommandsOnCommandList(ShaderFuzzingState* Fuzzer, ID3D12GraphicsCommandList* CommandList, ID3D12PipelineState* PSO,
+	ID3D12RootSignature* RootSig, RootSigResourceDesc RootSigDesc,
+	const ShaderMetadata& VertMeta, const ShaderMetadata& PixelMeta,
+	std::vector<uint64>& AllResourcesInUse, std::unordered_map<uint64, int32>& AllHeapsInUseAndCounts,
+	std::vector<ID3D12DescriptorHeap*>& SRVDescriptorHeaps)
+{
+	std::vector<ResourceLifecycleManager::ResourceToTransition> BufferedResourceTransitions;
+
+	auto TransitionResource = [&](uint64 ResID, D3D12_RESOURCE_STATES States)
+	{
+		ResourceLifecycleManager::ResourceToTransition ResTrans;
+		ResTrans.ResourceID = ResID;
+		ResTrans.NextState = States;
+
+		BufferedResourceTransitions.push_back(ResTrans);
+	};
+
+	auto FlushResourceTransitions = [&]()
+	{
+		Fuzzer->D3DPersist->ResourceMgr.PerformResourceTransitions(BufferedResourceTransitions, CommandList);
+		BufferedResourceTransitions.clear();
+	};
+
+	const int32 RTWidth = Fuzzer->Config->RTWidth;
+	const int32 RTHeight = Fuzzer->Config->RTHeight;
+
+	// Create resources (including backbuffer?)
+	uint64 BackBufferResourceID = 0;
+	ID3D12Resource* BackBufferResource = nullptr;
+	{
+		ResourceLifecycleManager::ResourceDesc BackBufferDesc = {};
+		BackBufferDesc.NodeVisibilityMask = 0x01;
+		BackBufferDesc.IsUploadHeap = false;
+		BackBufferDesc.ResDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		BackBufferDesc.ResDesc.Width = RTWidth;
+		BackBufferDesc.ResDesc.Height = RTHeight;
+		BackBufferDesc.ResDesc.DepthOrArraySize = 1;
+		BackBufferDesc.ResDesc.SampleDesc.Count = 1;
+		BackBufferDesc.ResDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+		BackBufferDesc.ResDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+
+		BackBufferResourceID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(BackBufferDesc, &BackBufferResource);
+		AllResourcesInUse.push_back(BackBufferResourceID);
+
+		BackBufferResource->SetName(L"Backbuffer");
+
+		TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		FlushResourceTransitions();
+	}
+
+	CommandList->SetPipelineState(PSO);
+	CommandList->SetGraphicsRootSignature(RootSig);
+
+	{
+		D3D12_VIEWPORT Viewport = {};
+		Viewport.MinDepth = 0;
+		Viewport.MaxDepth = 1;
+		Viewport.TopLeftX = 0;
+		Viewport.TopLeftY = 0;
+		Viewport.Width = RTWidth;
+		Viewport.Height = RTHeight;
+		CommandList->RSSetViewports(1, &Viewport);
+
+		D3D12_RECT ScissorRect = {};
+		ScissorRect.left = 0;
+		ScissorRect.right = RTWidth;
+		ScissorRect.top = 0;
+		ScissorRect.bottom = RTHeight;
+		CommandList->RSSetScissorRects(1, &ScissorRect);
+
+		D3D12_DESCRIPTOR_HEAP_DESC DescriptorHeapDesc = {};
+		DescriptorHeapDesc.NumDescriptors = 1;
+		DescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+
+		ID3D12DescriptorHeap* DescriptorHeap = nullptr;
+		Fuzzer->D3DDevice->CreateDescriptorHeap(&DescriptorHeapDesc, IID_PPV_ARGS(&DescriptorHeap));
+		// TODO: Leaking DescriptorHeap
+
+		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		Fuzzer->D3DDevice->CreateRenderTargetView(BackBufferResource, nullptr, rtvHandle);
+
+		CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+		if (Fuzzer->Config->ShouldClearRTVBeforeCase)
+		{
+			float ClearColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			CommandList->ClearRenderTargetView(rtvHandle, ClearColor, 0, nullptr);
+		}
+	}
+
+	// Setup resources (resource transitions?)
+
+	// These two need to correspond
+	std::vector<int32> DescriptorHeapRootSigSlot;
+
+	for (auto TexDesc : RootSigDesc.TexDescs)
+	{
+		const int32 TextureWidth = (1 << Fuzzer->GetIntInRange(6, 8));
+		const int32 TextureHeight = TextureWidth;
+		const int bpp = 4; // Assuming 32-bit format
+
+		const int32 BufferSize = TextureWidth * TextureHeight * bpp;
+
+		D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, TextureWidth, TextureHeight, 1, 1);
+		D3D12_RESOURCE_DESC UploadResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+
+		ID3D12Resource* TextureResource = nullptr;
+		ID3D12Resource* TextureUploadResource = nullptr;
+
+		ResourceLifecycleManager::ResourceDesc ResDesc, UploadResDesc;
+		ResDesc.ResDesc = ResourceDesc;
+		ResDesc.IsUploadHeap = false;
+		UploadResDesc.ResDesc = UploadResourceDesc;
+		UploadResDesc.IsUploadHeap = true;
+
+		uint64 ResID = 0;
+		if (Fuzzer->GetFloat01() < Fuzzer->Config->PlacedResourceChance)
+		{
+			ResDesc.Type = ResourceLifecycleManager::ResourceType::Placed;
+
+			uint64 HeapID = 0;
+			ResID = Fuzzer->D3DPersist->ResourceMgr.AcquirePlacedResource(ResDesc, &TextureResource, &HeapID);
+
+			AllHeapsInUseAndCounts[HeapID]++;
+		}
+		else
+		{
+			ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(ResDesc, &TextureResource);
+		}
+
+		uint64 UploadResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(UploadResDesc, &TextureUploadResource);
+
+		void* pTexturePixelData = nullptr;
+		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+		HRESULT hr = TextureUploadResource->Map(0, &readRange, &pTexturePixelData);
+		ASSERT(SUCCEEDED(hr));
+
+		SetRandomBytes(Fuzzer, pTexturePixelData, BufferSize);
+
+		TextureUploadResource->Unmap(0, nullptr);
+
+		TransitionResource(ResID, D3D12_RESOURCE_STATE_COPY_DEST);
+		FlushResourceTransitions();
+
+		// TODO: Resource barriers before and after
+		CopyTextureResource(CommandList, TextureUploadResource, TextureResource, TextureWidth, TextureHeight, TextureWidth * bpp);
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels = 1;
+
+		ID3D12DescriptorHeap* TextureSRVHeap = nullptr;
+
+		// TODO: Descriptor heap needs to go somewhere, maybe on texture?
+		D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+		srvHeapDesc.NumDescriptors = 1;
+		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+		hr = Fuzzer->D3DDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&TextureSRVHeap));
+		// TODO: Leaking TextureSRVHeap
+
+		ASSERT(SUCCEEDED(hr));
+
+		Fuzzer->D3DDevice->CreateShaderResourceView(TextureResource, &srvDesc, TextureSRVHeap->GetCPUDescriptorHandleForHeapStart());
+
+		SRVDescriptorHeaps.push_back(TextureSRVHeap);
+		DescriptorHeapRootSigSlot.push_back(TexDesc.RootSigSlot);
+
+		AllResourcesInUse.push_back(ResID);
+		AllResourcesInUse.push_back(UploadResID);
+
+		// TODO: Compute which one?
+		TransitionResource(ResID, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	}
+
+	// TODO: Set descriptor heaps and stuff
+	ASSERT(SRVDescriptorHeaps.size() == DescriptorHeapRootSigSlot.size());
+	for (int32 i = 0; i < SRVDescriptorHeaps.size(); i++)
+	{
+		//CommandList->SetDescriptorHeaps(SRVDescriptorHeaps.size(), SRVDescriptorHeaps.data());
+		CommandList->SetDescriptorHeaps(1, &SRVDescriptorHeaps[i]);
+		CommandList->SetGraphicsRootDescriptorTable(DescriptorHeapRootSigSlot[i], SRVDescriptorHeaps[i]->GetGPUDescriptorHandleForHeapStart());
+	}
+
+	for (auto CBVDesc : RootSigDesc.CBVDescs)
+	{
+		D3D12_RESOURCE_DESC CBVResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(CBVDesc.BufferSize);
+
+		ResourceLifecycleManager::ResourceDesc CBVResDesc;
+		CBVResDesc.ResDesc = CBVResourceDesc;
+		CBVResDesc.IsUploadHeap = true;
+
+		ID3D12Resource* D3DResource = nullptr;
+		auto ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(CBVResDesc, &D3DResource);
+
+		void* pBufferData = nullptr;
+		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+		HRESULT hr = D3DResource->Map(0, &readRange, &pBufferData);
+		ASSERT(SUCCEEDED(hr));
+
+		if (Fuzzer->Config->CBVUploadRandomFloatData != 0)
+		{
+			float* pFloatData = (float*)pBufferData;
+			for (int32 i = 0; i < CBVDesc.BufferSize / 4; i++)
+			{
+				pFloatData[i] = Fuzzer->GetFloatInRange(-100.0f, 100.0f);
+			}
+		}
+		else
+		{
+			SetRandomBytes(Fuzzer, pBufferData, CBVDesc.BufferSize);
+		}
+
+		D3DResource->Unmap(0, nullptr);
+
+		CommandList->SetGraphicsRootConstantBufferView(CBVDesc.RootSigSlot, D3DResource->GetGPUVirtualAddress());
+
+		//TransitionResource(ResID, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+		AllResourcesInUse.push_back(ResID);
+	}
+
+	// Set resources in cmd list and IA vertex stuff
+
+	const int32 VertexCount = Fuzzer->GetIntInRange(30, 100);
+
+	for (int32 IAParamIdx = 0; IAParamIdx < VertMeta.NumParams; IAParamIdx++)
+	{
+		auto ParamMeta = VertMeta.InputParamMetadata[IAParamIdx];
+		int32 BufferSize = VertexCount * 16;
+
+		D3D12_RESOURCE_DESC VertResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+
+		ResourceLifecycleManager::ResourceDesc VertDesc;
+		VertDesc.ResDesc = VertResourceDesc;
+		VertDesc.IsUploadHeap = true;
+
+		ID3D12Resource* VertResource = nullptr;
+		uint64 ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(VertDesc, &VertResource);
+
+		void* pVertData = nullptr;
+		D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
+		HRESULT hr = VertResource->Map(0, &readRange, &pVertData);
+		ASSERT(SUCCEEDED(hr));
+
+		float* pFloatData = (float*)pVertData;
+		if (ParamMeta.Semantic == ShaderSemantic::POSITION)
+		{
+			for (int32 i = 0; i < 4 * VertexCount; i += 4)
+			{
+				pFloatData[i + 0] = Fuzzer->GetFloatInRange(-1.0f, 1.0f);
+				pFloatData[i + 1] = Fuzzer->GetFloatInRange(-1.0f, 1.0f);
+				pFloatData[i + 2] = Fuzzer->GetFloat01();
+				pFloatData[i + 3] = Fuzzer->GetFloat01();
+			}
+		}
+		else
+		{
+			for (int32 i = 0; i < 4 * VertexCount; i++)
+			{
+				pFloatData[i] = Fuzzer->GetFloatInRange(-100.0f, 100.0f);
+			}
+		}
+
+		VertResource->Unmap(0, nullptr);
+
+		D3D12_VERTEX_BUFFER_VIEW vtbView = {};
+		vtbView.BufferLocation = VertResource->GetGPUVirtualAddress();
+		vtbView.SizeInBytes = BufferSize;
+		vtbView.StrideInBytes = 16;// *VertShader.ShaderMeta.NumParams; // I think????
+
+		CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		CommandList->IASetVertexBuffers(ParamMeta.ParamIndex, 1, &vtbView);
+
+		//TransitionResource(ResID, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+		AllResourcesInUse.push_back(ResID);
+	}
+
+	FlushResourceTransitions();
+
+#if defined(WITH_PIPELINE_STATS_QUERY)
+	ID3D12QueryHeap* QueryHeap = nullptr;
+
+	D3D12_QUERY_HEAP_DESC QueryHeapDesc = {};
+	QueryHeapDesc.Count = 1;
+	QueryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
+	Fuzzer->D3DDevice->CreateQueryHeap(&QueryHeapDesc, IID_PPV_ARGS(&QueryHeap));
+
+	ASSERT(QueryHeap != nullptr);
+
+	CommandList->BeginQuery(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+#endif
+
+	CommandList->DrawInstanced(VertexCount, 1, 0, 0);
+
+#if defined(WITH_PIPELINE_STATS_QUERY)
+	CommandList->EndQuery(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+
+	ID3D12Resource* DestBuffer = nullptr;
+	{
+		D3D12_HEAP_PROPERTIES HeapProps = {};
+		HeapProps.Type = D3D12_HEAP_TYPE_READBACK;
+		HeapProps.CreationNodeMask = 1;
+		HeapProps.VisibleNodeMask = 1;
+
+		D3D12_RESOURCE_DESC QueryBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS));
+
+		Fuzzer->D3DDevice->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &QueryBufferDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&DestBuffer));
+	}
+
+	CommandList->ResolveQueryData(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0, 1, DestBuffer, 0);
+#endif
+
+	const bool ShouldReadbackImage = Fuzzer->Config->ShouldReadbackImage;
+
+	if (ShouldReadbackImage)
+	{
+		ASSERT(Fuzzer->D3DPersist->RTReadback != nullptr);
+
+		D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};
+		CopyLocDst.pResource = Fuzzer->D3DPersist->RTReadback;
+		CopyLocDst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		CopyLocDst.PlacedFootprint.Offset = 0;
+		CopyLocDst.PlacedFootprint.Footprint.Width = RTWidth;
+		CopyLocDst.PlacedFootprint.Footprint.Height = RTHeight;
+		CopyLocDst.PlacedFootprint.Footprint.Depth = 1;
+		CopyLocDst.PlacedFootprint.Footprint.RowPitch = RTWidth * 4;
+		CopyLocDst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+
+		CopyLocSrc.pResource = BackBufferResource;
+		CopyLocSrc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		CopyLocSrc.SubresourceIndex = 0;
+
+		TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		FlushResourceTransitions();
+
+		CommandList->CopyTextureRegion(&CopyLocDst, 0, 0, 0, &CopyLocSrc, nullptr);
+	}
+
+	CommandList->Close();
+}
+
+void PostExecuteResourceTeardown(ShaderFuzzingState* Fuzzer, const std::vector<uint64>& AllResourcesInUse, const std::unordered_map<uint64, int32>& AllHeapsInUseAndCounts)
+{
+	for (auto ResID : AllResourcesInUse)
+	{
+		Fuzzer->D3DPersist->ResourceMgr.RelinquishResource(ResID);
+	}
+
+	for (auto HeapIDAndCount : AllHeapsInUseAndCounts)
+	{
+		uint64 HeapID = HeapIDAndCount.first;
+		int32 Count = HeapIDAndCount.second;
+		for (int32 i = 0; i < Count; i++)
+		{
+			Fuzzer->D3DPersist->ResourceMgr.RelinquishHeap(HeapID);
+		}
+	}
+
+	float ResDeleteChance = Fuzzer->Config->ResourceDeletionChance;
+	if (ResDeleteChance > 0.0f)
+	{
+		for (auto ResID : AllResourcesInUse)
+		{
+			if (ResDeleteChance >= 1.0f || Fuzzer->GetFloat01() < ResDeleteChance)
+			{
+				Fuzzer->D3DPersist->ResourceMgr.RequestResourceDestroyed(ResID);
+			}
+		}
+	}
+
+	float HeapDeleteChance = Fuzzer->Config->HeapDeletionChance;
+	if (HeapDeleteChance > 0.0f)
+	{
+		for (auto HeapIDAndCount : AllHeapsInUseAndCounts)
+		{
+			uint64 HeapID = HeapIDAndCount.first;
+			if (HeapDeleteChance >= 1.0f || Fuzzer->GetFloat01() < HeapDeleteChance)
+			{
+				Fuzzer->D3DPersist->ResourceMgr.RequestHeapDestroyed(HeapID);
+			}
+		}
+	}
+
+	// TODO: Is this safe to do here, or do we need to have some sort of recycling system that tracks
+	// if there are any outstanding uses of the heap on the command queue?
+	Fuzzer->D3DPersist->ResourceMgr.ResetAllHeapOffsets();
+}
+
 void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 {
 	for (int32_t Iteration = 0; Iteration < NumIterations; Iteration++)
@@ -1500,6 +1892,8 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		VertShader.Type = D3DShaderType::Vertex;
 		PixelShader.Type = D3DShaderType::Pixel;
 
+		//--------------------
+		// HLSL AST Fuzzer path
 		CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
 
 		// Set types
@@ -1511,13 +1905,10 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 		VerifyShaderCompilation(&VertShader);
 		VerifyShaderCompilation(&PixelShader);
+		//--------------------
+		// TODO: DXBC Bytecode Fuzzer path
 
-		//uint64 FuzzerInit = Fuzzer->RNGState();
-		//WriteDataToFile(StringStackBuffer<256>("%llu_vertex.hlsl", FuzzerInit).buffer, VertShader.SourceCode.data(), VertShader.SourceCode.length());
-		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.hlsl", FuzzerInit).buffer, PixelShader.SourceCode.data(), PixelShader.SourceCode.length());
-		//
-		//WriteDataToFile(StringStackBuffer<256>("%llu_vertex.dxbc", FuzzerInit).buffer, VertShader.ByteCodeBlob->GetBufferPointer(), VertShader.ByteCodeBlob->GetBufferSize());
-		//WriteDataToFile(StringStackBuffer<256>("%llu_pixel.dxbc", FuzzerInit).buffer, PixelShader.ByteCodeBlob->GetBufferPointer(), PixelShader.ByteCodeBlob->GetBufferSize());
+		//--------------------
 
 		ID3D12RootSignature* RootSig = nullptr;
 		ID3D12PipelineState* PSO = nullptr;
@@ -1539,390 +1930,14 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			ASSERT(SUCCEEDED(Fuzzer->D3DDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, CommandAllocator, 0, IID_PPV_ARGS(&CommandList))));
 		}
 
-		std::vector<ResourceLifecycleManager::ResourceToTransition> BufferedResourceTransitions;
-
-		auto TransitionResource = [&](uint64 ResID, D3D12_RESOURCE_STATES States)
-		{
-			ResourceLifecycleManager::ResourceToTransition ResTrans;
-			ResTrans.ResourceID = ResID;
-			ResTrans.NextState = States;
-
-			BufferedResourceTransitions.push_back(ResTrans);
-		};
-
-		auto FlushResourceTransitions = [&]()
-		{
-			Fuzzer->D3DPersist->ResourceMgr.PerformResourceTransitions(BufferedResourceTransitions, CommandList);
-			BufferedResourceTransitions.clear();
-		};
-
-		const int32 RTWidth = Fuzzer->Config->RTWidth;
-		const int32 RTHeight = Fuzzer->Config->RTHeight;
-
-		// Create resources (including backbuffer?)
-		uint64 BackBufferResourceID = 0;
-		ID3D12Resource* BackBufferResource = nullptr;
 		std::vector<uint64> AllResourcesInUse;
 		std::unordered_map<uint64, int32> AllHeapsInUseAndCounts;
-		{
-			ResourceLifecycleManager::ResourceDesc BackBufferDesc = {};
-			BackBufferDesc.NodeVisibilityMask = 0x01;
-			BackBufferDesc.IsUploadHeap = false;
-			BackBufferDesc.ResDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-			BackBufferDesc.ResDesc.Width = RTWidth;
-			BackBufferDesc.ResDesc.Height = RTHeight;
-			BackBufferDesc.ResDesc.DepthOrArraySize = 1;
-			BackBufferDesc.ResDesc.SampleDesc.Count = 1;
-			BackBufferDesc.ResDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-			BackBufferDesc.ResDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 
-			BackBufferResourceID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(BackBufferDesc, &BackBufferResource);
-			AllResourcesInUse.push_back(BackBufferResourceID);
-
-			BackBufferResource->SetName(L"Backbuffer");
-
-			TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_RENDER_TARGET);
-			FlushResourceTransitions();
-		}
-
-		CommandList->SetPipelineState(PSO);
-		CommandList->SetGraphicsRootSignature(RootSig);
-
-		{
-			D3D12_VIEWPORT Viewport = {};
-			Viewport.MinDepth = 0;
-			Viewport.MaxDepth = 1;
-			Viewport.TopLeftX = 0;
-			Viewport.TopLeftY = 0;
-			Viewport.Width = RTWidth;
-			Viewport.Height = RTHeight;
-			CommandList->RSSetViewports(1, &Viewport);
-
-			D3D12_RECT ScissorRect = {};
-			ScissorRect.left = 0;
-			ScissorRect.right = RTWidth;
-			ScissorRect.top = 0;
-			ScissorRect.bottom = RTHeight;
-			CommandList->RSSetScissorRects(1, &ScissorRect);
-
-			D3D12_DESCRIPTOR_HEAP_DESC DescriptorHeapDesc = {};
-			DescriptorHeapDesc.NumDescriptors = 1;
-			DescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-			
-			ID3D12DescriptorHeap* DescriptorHeap = nullptr;
-			Fuzzer->D3DDevice->CreateDescriptorHeap(&DescriptorHeapDesc, IID_PPV_ARGS(&DescriptorHeap));
-			// TODO: Leaking DescriptorHeap
-
-			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-			Fuzzer->D3DDevice->CreateRenderTargetView(BackBufferResource, nullptr, rtvHandle);
-
-			CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-
-			if (Fuzzer->Config->ShouldClearRTVBeforeCase)
-			{
-				float ClearColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-				CommandList->ClearRenderTargetView(rtvHandle, ClearColor, 0, nullptr);
-			}
-		}
-
-		// Setup resources (resource transitions?)
-		
-		// These two need to correspond
 		std::vector<ID3D12DescriptorHeap*> SRVDescriptorHeaps;
-		std::vector<int32> DescriptorHeapRootSigSlot;
 
-		for (auto TexDesc : RootSigDesc.TexDescs)
-		{
-			const int32 TextureWidth = (1 << Fuzzer->GetIntInRange(6, 8));
-			const int32 TextureHeight = TextureWidth;
-			const int bpp = 4; // Assuming 32-bit format
+		GenerateDrawingCommandsOnCommandList(Fuzzer, CommandList, PSO, RootSig, RootSigDesc, VertShader.ShaderMeta, PixelShader.ShaderMeta, AllResourcesInUse, AllHeapsInUseAndCounts, SRVDescriptorHeaps);
 
-			const int32 BufferSize = TextureWidth * TextureHeight * bpp;
-
-			D3D12_RESOURCE_DESC ResourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, TextureWidth, TextureHeight, 1, 1);
-			D3D12_RESOURCE_DESC UploadResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
-
-			ID3D12Resource* TextureResource = nullptr;
-			ID3D12Resource* TextureUploadResource = nullptr;
-
-			ResourceLifecycleManager::ResourceDesc ResDesc, UploadResDesc;
-			ResDesc.ResDesc = ResourceDesc;
-			ResDesc.IsUploadHeap = false;
-			UploadResDesc.ResDesc = UploadResourceDesc;
-			UploadResDesc.IsUploadHeap = true;
-
-			uint64 ResID = 0;
-			if (Fuzzer->GetFloat01() < Fuzzer->Config->PlacedResourceChance)
-			{
-				ResDesc.Type = ResourceLifecycleManager::ResourceType::Placed;
-
-				uint64 HeapID = 0;
-				ResID = Fuzzer->D3DPersist->ResourceMgr.AcquirePlacedResource(ResDesc, &TextureResource, &HeapID);
-
-				AllHeapsInUseAndCounts[HeapID]++;
-			}
-			else
-			{
-				ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(ResDesc, &TextureResource);
-			}
-
-			uint64 UploadResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(UploadResDesc, &TextureUploadResource);
-
-			void* pTexturePixelData = nullptr;
-			D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
-			HRESULT hr = TextureUploadResource->Map(0, &readRange, &pTexturePixelData);
-			ASSERT(SUCCEEDED(hr));
-
-			SetRandomBytes(Fuzzer, pTexturePixelData, BufferSize);
-
-			TextureUploadResource->Unmap(0, nullptr);
-
-			TransitionResource(ResID, D3D12_RESOURCE_STATE_COPY_DEST);
-			FlushResourceTransitions();
-
-			// TODO: Resource barriers before and after
-			CopyTextureResource(CommandList, TextureUploadResource, TextureResource, TextureWidth, TextureHeight, TextureWidth * bpp);
-
-			D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-			srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-			srvDesc.Texture2D.MipLevels = 1;
-
-			ID3D12DescriptorHeap* TextureSRVHeap = nullptr;
-
-			// TODO: Descriptor heap needs to go somewhere, maybe on texture?
-			D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-			srvHeapDesc.NumDescriptors = 1;
-			srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-			srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-			hr = Fuzzer->D3DDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&TextureSRVHeap));
-			// TODO: Leaking TextureSRVHeap
-
-			ASSERT(SUCCEEDED(hr));
-
-			Fuzzer->D3DDevice->CreateShaderResourceView(TextureResource, &srvDesc, TextureSRVHeap->GetCPUDescriptorHandleForHeapStart());
-
-			SRVDescriptorHeaps.push_back(TextureSRVHeap);
-			DescriptorHeapRootSigSlot.push_back(TexDesc.RootSigSlot);
-
-			AllResourcesInUse.push_back(ResID);
-			AllResourcesInUse.push_back(UploadResID);
-
-			// TODO: Compute which one?
-			TransitionResource(ResID, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-		}
-
-		// TODO: Set descriptor heaps and stuff
-		ASSERT(SRVDescriptorHeaps.size() == DescriptorHeapRootSigSlot.size());
-		for (int32 i = 0; i < SRVDescriptorHeaps.size(); i++)
-		{
-			//CommandList->SetDescriptorHeaps(SRVDescriptorHeaps.size(), SRVDescriptorHeaps.data());
-			CommandList->SetDescriptorHeaps(1, &SRVDescriptorHeaps[i]);
-			CommandList->SetGraphicsRootDescriptorTable(DescriptorHeapRootSigSlot[i], SRVDescriptorHeaps[i]->GetGPUDescriptorHandleForHeapStart());
-		}
-
-		for (auto CBVDesc : RootSigDesc.CBVDescs)
-		{
-			D3D12_RESOURCE_DESC CBVResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(CBVDesc.BufferSize);
-
-			ResourceLifecycleManager::ResourceDesc CBVResDesc;
-			CBVResDesc.ResDesc = CBVResourceDesc;
-			CBVResDesc.IsUploadHeap = true;
-
-			ID3D12Resource* D3DResource = nullptr;
-			auto ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(CBVResDesc, &D3DResource);
-
-			void* pBufferData = nullptr;
-			D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
-			HRESULT hr = D3DResource->Map(0, &readRange, &pBufferData);
-			ASSERT(SUCCEEDED(hr));
-
-			if (Fuzzer->Config->CBVUploadRandomFloatData != 0)
-			{
-				float* pFloatData = (float*)pBufferData;
-				for (int32 i = 0; i < CBVDesc.BufferSize / 4; i++)
-				{
-					pFloatData[i] = Fuzzer->GetFloatInRange(-100.0f, 100.0f);
-				}
-			}
-			else
-			{
-				SetRandomBytes(Fuzzer, pBufferData, CBVDesc.BufferSize);
-			}
-
-			D3DResource->Unmap(0, nullptr);
-
-			CommandList->SetGraphicsRootConstantBufferView(CBVDesc.RootSigSlot, D3DResource->GetGPUVirtualAddress());
-
-			//TransitionResource(ResID, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-
-			AllResourcesInUse.push_back(ResID);
-		}
-
-		// Set resources in cmd list and IA vertex stuff
-
-		const int32 VertexCount = Fuzzer->GetIntInRange(30, 100);
-
-		for (int32 IAParamIdx = 0; IAParamIdx < VertShader.ShaderMeta.NumParams; IAParamIdx++)
-		{
-			auto ParamMeta = VertShader.ShaderMeta.InputParamMetadata[IAParamIdx];
-			int32 BufferSize = VertexCount * 16;
-
-			D3D12_RESOURCE_DESC VertResourceDesc = CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
-
-			ResourceLifecycleManager::ResourceDesc VertDesc;
-			VertDesc.ResDesc = VertResourceDesc;
-			VertDesc.IsUploadHeap = true;
-
-			ID3D12Resource* VertResource = nullptr;
-			uint64 ResID = Fuzzer->D3DPersist->ResourceMgr.AcquireResource(VertDesc, &VertResource);
-
-			void* pVertData = nullptr;
-			D3D12_RANGE readRange = {};        // We do not intend to read from this resource on the CPU.
-			HRESULT hr = VertResource->Map(0, &readRange, &pVertData);
-			ASSERT(SUCCEEDED(hr));
-
-			float* pFloatData = (float*)pVertData;
-			if (ParamMeta.Semantic == ShaderSemantic::POSITION)
-			{
-				for (int32 i = 0; i < 4 * VertexCount; i += 4)
-				{
-					pFloatData[i + 0] = Fuzzer->GetFloatInRange(-1.0f, 1.0f);
-					pFloatData[i + 1] = Fuzzer->GetFloatInRange(-1.0f, 1.0f);
-					pFloatData[i + 2] = Fuzzer->GetFloat01();
-					pFloatData[i + 3] = Fuzzer->GetFloat01();
-				}
-			}
-			else
-			{
-				for (int32 i = 0; i < 4 * VertexCount; i++)
-				{
-					pFloatData[i] = Fuzzer->GetFloatInRange(-100.0f, 100.0f);
-				}
-			}
-
-			VertResource->Unmap(0, nullptr);
-
-			D3D12_VERTEX_BUFFER_VIEW vtbView = {};
-			vtbView.BufferLocation = VertResource->GetGPUVirtualAddress();
-			vtbView.SizeInBytes = BufferSize;
-			vtbView.StrideInBytes = 16;// *VertShader.ShaderMeta.NumParams; // I think????
-
-			CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-			CommandList->IASetVertexBuffers(ParamMeta.ParamIndex, 1, &vtbView);
-
-			//TransitionResource(ResID, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-
-			AllResourcesInUse.push_back(ResID);
-		}
-		
-		FlushResourceTransitions();
-
-#if defined(WITH_PIPELINE_STATS_QUERY)
-		ID3D12QueryHeap* QueryHeap = nullptr;
-
-		D3D12_QUERY_HEAP_DESC QueryHeapDesc = {};
-		QueryHeapDesc.Count = 1;
-		QueryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
-		Fuzzer->D3DDevice->CreateQueryHeap(&QueryHeapDesc, IID_PPV_ARGS(&QueryHeap));
-
-		ASSERT(QueryHeap != nullptr);
-
-		CommandList->BeginQuery(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
-#endif
-
-		CommandList->DrawInstanced(VertexCount, 1, 0, 0);
-
-#if defined(WITH_PIPELINE_STATS_QUERY)
-		CommandList->EndQuery(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
-
-		ID3D12Resource* DestBuffer = nullptr;
-		{
-			D3D12_HEAP_PROPERTIES HeapProps = {};
-			HeapProps.Type = D3D12_HEAP_TYPE_READBACK;
-			HeapProps.CreationNodeMask = 1;
-			HeapProps.VisibleNodeMask = 1;
-
-			D3D12_RESOURCE_DESC QueryBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS));
-
-			Fuzzer->D3DDevice->CreateCommittedResource(&HeapProps, D3D12_HEAP_FLAG_NONE, &QueryBufferDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&DestBuffer));
-		}
-
-		CommandList->ResolveQueryData(QueryHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0, 1, DestBuffer, 0);
-#endif
-
-		const bool ShouldReadbackImage = Fuzzer->Config->ShouldReadbackImage;
-
-		if (ShouldReadbackImage)
-		{
-			ASSERT(Fuzzer->D3DPersist->RTReadback != nullptr);
-			
-			D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};
-			CopyLocDst.pResource = Fuzzer->D3DPersist->RTReadback;
-			CopyLocDst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-			CopyLocDst.PlacedFootprint.Offset = 0;
-			CopyLocDst.PlacedFootprint.Footprint.Width = RTWidth;
-			CopyLocDst.PlacedFootprint.Footprint.Height = RTHeight;
-			CopyLocDst.PlacedFootprint.Footprint.Depth = 1;
-			CopyLocDst.PlacedFootprint.Footprint.RowPitch = RTWidth * 4;
-			CopyLocDst.PlacedFootprint.Footprint.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-
-			CopyLocSrc.pResource = BackBufferResource;
-			CopyLocSrc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			CopyLocSrc.SubresourceIndex = 0;
-
-			TransitionResource(BackBufferResourceID, D3D12_RESOURCE_STATE_COPY_SOURCE);
-			FlushResourceTransitions();
-
-			CommandList->CopyTextureRegion(&CopyLocDst, 0, 0, 0, &CopyLocSrc, nullptr);
-		}
-
-		CommandList->Close();
-
-		for (auto ResID : AllResourcesInUse)
-		{
-			Fuzzer->D3DPersist->ResourceMgr.RelinquishResource(ResID);
-		}
-
-		for (auto HeapIDAndCount: AllHeapsInUseAndCounts)
-		{
-			uint64 HeapID = HeapIDAndCount.first;
-			int32 Count = HeapIDAndCount.second;
-			for (int32 i = 0; i < Count; i++)
-			{
-				Fuzzer->D3DPersist->ResourceMgr.RelinquishHeap(HeapID);
-			}
-		}
-
-		float ResDeleteChance = Fuzzer->Config->ResourceDeletionChance;
-		if (ResDeleteChance > 0.0f)
-		{
-			for (auto ResID : AllResourcesInUse)
-			{
-				if (ResDeleteChance >= 1.0f || Fuzzer->GetFloat01() < ResDeleteChance)
-				{
-					Fuzzer->D3DPersist->ResourceMgr.RequestResourceDestroyed(ResID);
-				}
-			}
-		}
-
-		float HeapDeleteChance = Fuzzer->Config->HeapDeletionChance;
-		if (HeapDeleteChance > 0.0f)
-		{
-			for (auto HeapIDAndCount : AllHeapsInUseAndCounts)
-			{
-				uint64 HeapID = HeapIDAndCount.first;
-				if (HeapDeleteChance >= 1.0f || Fuzzer->GetFloat01() < HeapDeleteChance)
-				{
-					Fuzzer->D3DPersist->ResourceMgr.RequestHeapDestroyed(HeapID);
-				}
-			}
-		}
-
-		// TODO: Is this safe to do here, or do we need to have some sort of recycling system that tracks
-		// if there are any outstanding uses of the heap on the command queue?
-		Fuzzer->D3DPersist->ResourceMgr.ResetAllHeapOffsets();
+		PostExecuteResourceTeardown(Fuzzer, AllResourcesInUse, AllHeapsInUseAndCounts);
 
 		ID3D12CommandList* CommandLists[] = { CommandList };
 		if (Fuzzer->Config->LockMutexAroundExecCmdList != 0)
@@ -1948,13 +1963,6 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		Fuzzer->D3DPersist->CmdListMgr.OnFrameFenceSignaled(ValueSignaled);
 
 		Fuzzer->D3DPersist->ResourceMgr.OnFrameFenceSignaled(ValueSignaled);
-
-		// Randomly destroy some resources
-
-
-		// Should also figure out how to get rid of these when it's safe
-		// PSO->Release();
-		// RootSig->Release();
 
 		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(PSO, ValueSignaled);
 		Fuzzer->D3DPersist->ResourceMgr.DeferredDelete(RootSig, ValueSignaled);
@@ -1990,6 +1998,8 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		//LOG("Avg PS calls per fuzz case: %3.2f", PSCallsPerCase);
 #endif
 
+		const bool ShouldReadbackImage = Fuzzer->Config->ShouldReadbackImage;
+
 		if (ShouldReadbackImage)
 		{
 			// Have to wait for the GPU to finish before we can map the buffer that is filled w/ a copy of the render target
@@ -2004,6 +2014,9 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			void* pPixelData = nullptr;
 			HRESULT hr = RTReadback->Map(0, nullptr, &pPixelData);
 			ASSERT(SUCCEEDED(hr));
+
+			const int32 RTWidth = Fuzzer->Config->RTWidth;
+			const int32 RTHeight = Fuzzer->Config->RTHeight;
 
 			char filename[256] = {};
 			snprintf(filename, sizeof(filename), "../render_output/%s%llu%s.png", Fuzzer->Config->ReadbackImageNamePrepend, Fuzzer->InitialFuzzSeed, Fuzzer->Config->ReadbackImageNameAppend);

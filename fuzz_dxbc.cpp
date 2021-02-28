@@ -996,14 +996,14 @@ struct BytecodeOperand {
 	}
 };
 
-void ShaderDeclareGlobalFlags(FuzzGenerateD3DBytecodeState* Bytecode, bool isRefactoringAllowed)
+void ShaderDeclareGlobalFlags(D3DOpcodeState* Bytecode, bool isRefactoringAllowed)
 {
 	uint32 OpcodeDWORD = 0;
 	SetBitsFromWord<0, 10, D3DOpcodeType>(&OpcodeDWORD, D3DOpcodeType_DCL_GLOBAL_FLAGS);
 	SetBitsFromWord<24, 30>(&OpcodeDWORD, 1); // Set length to 1 DWORD (including this one)
 	SetBitsFromWord<11, 11>(&OpcodeDWORD, isRefactoringAllowed ? 1 : 0); // Set refactoring allowed
 
-	Bytecode->OutputBytecode.push_back(OpcodeDWORD);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
 }
 
 OperandSourceType OperandSourceTypeFromRegisterType(BytecodeRegisterType RegisterType)
@@ -1041,7 +1041,7 @@ OperandSourceType OperandSourceTypeFromRegisterType(BytecodeRegisterType Registe
 	return SourceType;
 }
 
-void ShaderWriteOperand(FuzzGenerateD3DBytecodeState* Bytecode, const BytecodeOperand& Op)
+void ShaderWriteOperand(D3DOpcodeState* Bytecode, const BytecodeOperand& Op)
 {
 	if (Op.Type == BytecodeOperandType::Register)
 	{
@@ -1071,8 +1071,8 @@ void ShaderWriteOperand(FuzzGenerateD3DBytecodeState* Bytecode, const BytecodeOp
 		SetBitsFromWord<20, 21>(&HeaderDWORD, OperandSourceIndexDimension_1D);
 		SetBitsFromWord<22, 24>(&HeaderDWORD, OperandSourceIndexRepr_Imm32);
 
-		Bytecode->OutputBytecode.push_back(HeaderDWORD);
-		Bytecode->OutputBytecode.push_back(Op.Register.RegIndex);
+		Bytecode->Opcodes.push_back(HeaderDWORD);
+		Bytecode->Opcodes.push_back(Op.Register.RegIndex);
 	}
 	else
 	{
@@ -1080,34 +1080,34 @@ void ShaderWriteOperand(FuzzGenerateD3DBytecodeState* Bytecode, const BytecodeOp
 	}
 }
 
-void ShaderDeclareInput(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, byte InputMask = 0x0F)
+void ShaderDeclareInput(D3DOpcodeState* Bytecode, int32 RegisterIndex, byte InputMask = 0x0F)
 {
 	uint32 OpcodeDWORD = 0;
 	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_DCL_INPUT);
 	SetBitsFromWord<24, 30>(&OpcodeDWORD, 3); // Set length to 3 DWORDs (including this one)
-	Bytecode->OutputBytecode.push_back(OpcodeDWORD);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
 	
 	auto Operand = BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(RegisterIndex), BytecodeOperandSwizzling(), InputMask);
 	ShaderWriteOperand(Bytecode, Operand);
 }
 
-void ShaderDeclareOutput(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, byte OutputMask = 0x0F)
+void ShaderDeclareOutput(D3DOpcodeState* Bytecode, int32 RegisterIndex, byte OutputMask = 0x0F)
 {
 	uint32 OpcodeDWORD = 0;
 	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_DCL_OUTPUT);
 	SetBitsFromWord<24, 30>(&OpcodeDWORD, 3); // Set length to 3 DWORDs (including this one)
-	Bytecode->OutputBytecode.push_back(OpcodeDWORD);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
 
 	auto Operand = BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(RegisterIndex), BytecodeOperandSwizzling(), OutputMask);
 	ShaderWriteOperand(Bytecode, Operand);
 }
 
-void ShaderDeclareOutput_SIV(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, OperandSemantic Semantic, byte OutputMask = 0x0F)
+void ShaderDeclareOutput_SIV(D3DOpcodeState* Bytecode, int32 RegisterIndex, OperandSemantic Semantic, byte OutputMask = 0x0F)
 {
 	uint32 OpcodeDWORD = 0;
 	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_DCL_OUTPUT_SIV);
 	SetBitsFromWord<24, 30>(&OpcodeDWORD, 4); // Set length to 4 DWORDs (including this one)
-	Bytecode->OutputBytecode.push_back(OpcodeDWORD);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
 
 	auto Operand = BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(RegisterIndex), BytecodeOperandSwizzling(), OutputMask);
 	ShaderWriteOperand(Bytecode, Operand);
@@ -1117,30 +1117,30 @@ void ShaderDeclareOutput_SIV(FuzzGenerateD3DBytecodeState* Bytecode, int32 Regis
 		SetBitsFromWord<0, 15>(&OpcodeDWORD, Semantic);
 	}
 
-	Bytecode->OutputBytecode.push_back(OpcodeDWORD);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
 }
 
-void ShaderDeclareCBVImm(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex, int32 SizeInBytes)
+void ShaderDeclareCBVImm(D3DOpcodeState* Bytecode, int32 RegisterIndex, int32 SizeInBytes)
 {
 
 }
 
-void ShaderDeclareTextureResource(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex)
+void ShaderDeclareTextureResource(D3DOpcodeState* Bytecode, int32 RegisterIndex)
 {
 
 }
 
-void ShaderDeclareSampler(FuzzGenerateD3DBytecodeState* Bytecode, int32 RegisterIndex /*TODO: Mode?*/)
+void ShaderDeclareSampler(D3DOpcodeState* Bytecode, int32 RegisterIndex /*TODO: Mode?*/)
 {
 
 }
 
-void ShaderDoMov(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeOperand Src, BytecodeOperand Dst)
+void ShaderDoMov(D3DOpcodeState* Bytecode, BytecodeOperand Src, BytecodeOperand Dst)
 {
 	uint32 OpcodeDWORD = 0;
 	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_MOV);
 	SetBitsFromWord<24, 30>(&OpcodeDWORD, 5); // Set length to 3 DWORDs (including this one)
-	Bytecode->OutputBytecode.push_back(OpcodeDWORD);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
 
 	ASSERT(Dst.Type == BytecodeOperandType::Register);
 
@@ -1148,45 +1148,44 @@ void ShaderDoMov(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeOperand Src, By
 	ShaderWriteOperand(Bytecode, Src);
 }
 
-void ShaderAddReg(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeOperand Src1, BytecodeOperand Src2, BytecodeRegisterRef Dst)
+void ShaderAddReg(D3DOpcodeState* Bytecode, BytecodeOperand Src1, BytecodeOperand Src2, BytecodeRegisterRef Dst)
 {
 
 }
 
-void ShaderFmad(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeOperand AddSrc, BytecodeOperand MulSrc1, BytecodeOperand MulSrc2, BytecodeRegisterRef Dst)
+void ShaderFmad(D3DOpcodeState* Bytecode, BytecodeOperand AddSrc, BytecodeOperand MulSrc1, BytecodeOperand MulSrc2, BytecodeRegisterRef Dst)
 {
 
 }
 
-void ShaderMul(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeOperand Src1, BytecodeOperand Src2, BytecodeRegisterRef Dst)
+void ShaderMul(D3DOpcodeState* Bytecode, BytecodeOperand Src1, BytecodeOperand Src2, BytecodeRegisterRef Dst)
 {
 
 }
 
-void ShaderSampleTextureLevel0(FuzzGenerateD3DBytecodeState* Bytecode, BytecodeRegisterRef Tex, BytecodeRegisterRef Sampler, BytecodeOperand UVs, BytecodeRegisterRef Dst, float MipsLevel)
+void ShaderSampleTextureLevel0(D3DOpcodeState* Bytecode, BytecodeRegisterRef Tex, BytecodeRegisterRef Sampler, BytecodeOperand UVs, BytecodeRegisterRef Dst, float MipsLevel)
 {
 	
 }
 
-void ShaderReturn(FuzzGenerateD3DBytecodeState* Bytecode)
+void ShaderReturn(D3DOpcodeState* Bytecode)
 {
 	uint32 OpcodeDWORD = 0;
 	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_RET);
 	SetBitsFromWord<24, 30>(&OpcodeDWORD, 1);
-	Bytecode->OutputBytecode.push_back(OpcodeDWORD);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
 }
 
 
-// TODO: Also take fuzzing state
 // TODO: Also take shader description (resources, parameters, etc)
-void GenerateBytecodeOpcodes(FuzzGenerateD3DBytecodeState* Bytecode)
+void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 {
 	Bytecode->NextWrittenTempRegister = 0;
 	Bytecode->TempRegisterClobberMask = 0;
-	Bytecode->OutputBytecode.clear();
+	Bytecode->Opcodes.clear();
 
 	// Blind reserve
-	Bytecode->OutputBytecode.reserve(1024);
+	Bytecode->Opcodes.reserve(1024);
 
 
 	// Generate declarations
@@ -1203,7 +1202,7 @@ void GenerateBytecodeOpcodes(FuzzGenerateD3DBytecodeState* Bytecode)
 	//}
 
 	
-	//byte* Cursor = (byte*)Bytecode->OutputBytecode.data();
+	//byte* Cursor = (byte*)Bytecode->Opcodes.data();
 	//for (int32 i = 0; i < 5; i++)
 	//{
 	//	D3DOpcode OpCode = GetD3DOpcodeFromCursor(&Cursor);
@@ -1211,8 +1210,66 @@ void GenerateBytecodeOpcodes(FuzzGenerateD3DBytecodeState* Bytecode)
 	//	ASSERT(false);
 	//}
 
-	//WriteDataToFile("../manual_bytecode/test_raw_01.bin", Bytecode->OutputBytecode.data(), Bytecode->OutputBytecode.size() * sizeof(uint32));
+	//WriteDataToFile("../manual_bytecode/test_raw_01.bin", Bytecode->Opcodes.data(), Bytecode->Opcodes.size() * sizeof(uint32));
 }
 
+void RandomiseShaderBytecodeParams(FuzzDXBCState* DXBCState, D3DOpcodeState* VSOpcodes, D3DOpcodeState* PSOpcodes)
+{
+	VSOpcodes->InputSemantics.push_back(ShaderSemantic::POSITION);
+	VSOpcodes->OutputSemantics.push_back(ShaderSemantic::SV_POSITION);
+
+	PSOpcodes->InputSemantics.push_back(ShaderSemantic::SV_POSITION);
+	PSOpcodes->OutputSemantics.push_back(ShaderSemantic::SV_TARGET);
+
+	// TODO: Add random ones as well
+}
+
+void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<unsigned char>* OutData)
+{
+
+}
+
+void GenerateShaderBytecode(D3DOpcodeState* Opcodes, std::vector<unsigned char>* OutBytecode)
+{
+	DXBCFileHeader DXBCHeader = {};
+	DXBCHeader.ChunkCount = 6; // ?
+	DXBCHeader.FileSizeInBytes = 0;
+	DXBCHeader.Unknown = 0;
+
+
+
+
+	// Fix up the header now that we know the length/checksum, and 
+}
+
+
+void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
+{
+	D3DOpcodeState VertShader;
+	VertShader.ShaderType = D3DShaderType::Vertex;
+
+	D3DOpcodeState PixelShader;
+	PixelShader.ShaderType = D3DShaderType::Pixel;
+
+	RandomiseShaderBytecodeParams(DXBCState, &VertShader, &PixelShader);
+
+	GenerateBytecodeOpcodes(DXBCState, &VertShader);
+	GenerateBytecodeOpcodes(DXBCState, &PixelShader);
+
+	std::vector<unsigned char> VSBytecode;
+	std::vector<unsigned char> PSBytecode;
+
+	GenerateShaderBytecode(&VertShader, &VSBytecode);
+	GenerateShaderBytecode(&PixelShader, &PSBytecode);
+
+	HRESULT hr;
+	hr = D3DCreateBlob(VSBytecode.size(), &DXBCState->VSBlob);
+	ASSERT(SUCCEEDED(hr));
+	memcpy(DXBCState->VSBlob->GetBufferPointer(), VSBytecode.data(), VSBytecode.size());
+
+	hr = D3DCreateBlob(PSBytecode.size(), &DXBCState->PSBlob);
+	ASSERT(SUCCEEDED(hr));
+	memcpy(DXBCState->PSBlob->GetBufferPointer(), PSBytecode.data(), PSBytecode.size());
+}
 
 

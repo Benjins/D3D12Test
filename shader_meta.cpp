@@ -11,6 +11,7 @@ static const char* ShaderSemanticNames[] = {
 	"TEXCOORD",
 	"NORMAL",
 	"SV_POSITION",
+	"SV_TARGET",
 };
 
 static_assert(ARRAY_COUNTOF(ShaderSemanticNames) == (int32)ShaderSemantic::Count, "sadfassdgf");

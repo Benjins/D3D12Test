@@ -25,6 +25,8 @@ enum struct ShaderSemantic
 
 	SV_POSITION,
 	INTER_LAST = SV_POSITION,
+
+	SV_TARGET,
 	
 	
 	Count
