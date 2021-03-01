@@ -99,23 +99,33 @@ void SpitOutShaderInfo()
 	//	SpitOutShaderInfoFor("vs_plain_tex_sample_2", VSPlain, D3DShaderType::Vertex);
 	//}
 
-	{
-		const char* VSPlain = "struct PSInput { float4 pos : SV_POSITION;  float2 uvs : TEXCOORD; };\n"
-			"Texture2D tex_1; SamplerState sampler_1;\n"
-			"Texture2D tex_2; SamplerState sampler_2;\n"
-			"float4 ff2;\n"
-			"PSInput Main(float4 pos : POSITION, float2 uvs : TEXCOORD) {\n"
-			"PSInput res;\n"
-			"res.pos = pos + tex_1.SampleLevel(sampler_1, pos.xy, 1.5) + tex_1.SampleLevel(sampler_2,  tex_2.SampleLevel(sampler_2, uvs * ff2.xy + ff2.zw, 0), 0);\n"
-			"res.uvs = uvs;\n"
-			"\nreturn res;\n"
-		"}";
-		SpitOutShaderInfoFor("vs_plain_tex_sample_cbv", VSPlain, D3DShaderType::Vertex);
-	}
+	//{
+	//	const char* VSPlain = "struct PSInput { float4 pos : SV_POSITION;  float2 uvs : TEXCOORD; };\n"
+	//		"Texture2D tex_1; SamplerState sampler_1;\n"
+	//		"Texture2D tex_2; SamplerState sampler_2;\n"
+	//		"float4 ff2;\n"
+	//		"PSInput Main(float4 pos : POSITION, float2 uvs : TEXCOORD) {\n"
+	//		"PSInput res;\n"
+	//		"res.pos = pos + tex_1.SampleLevel(sampler_1, pos.xy, 1.5) + tex_1.SampleLevel(sampler_2,  tex_2.SampleLevel(sampler_2, uvs * ff2.xy + ff2.zw, 0), 0);\n"
+	//		"res.uvs = uvs;\n"
+	//		"\nreturn res;\n"
+	//	"}";
+	//	SpitOutShaderInfoFor("vs_plain_tex_sample_cbv", VSPlain, D3DShaderType::Vertex);
+	//}
 
 	//{
 	//	const char* PSPlain = "struct PSInput { float4 pos : SV_POSITION; };float4 Main(PSInput input) : SV_TARGET { return float4(1.0,1.0,1.0,1.0); }";
 	//	SpitOutShaderInfoFor("ps_plain", PSPlain, D3DShaderType::Pixel);
+	//}
+
+	//{
+	//	const char* PSPlain = "struct PSInput { float4 pos : SV_POSITION; }; float4 Main(PSInput input) : SV_TARGET { return input.pos; }";
+	//	SpitOutShaderInfoFor("ps_plain_mov", PSPlain, D3DShaderType::Pixel);
+	//}
+	//
+	//{
+	//	const char* PSPlain = "struct PSInput { float4 pos : SV_POSITION; float4 uvs : TEXCOORD; }; float4 Main(PSInput input) : SV_TARGET { return input.pos + input.uvs; }";
+	//	SpitOutShaderInfoFor("ps_plain_add_coords", PSPlain, D3DShaderType::Pixel);
 	//}
 }
 

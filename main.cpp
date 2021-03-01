@@ -273,25 +273,28 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_2_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_bytecode.bin";
 		//const char* ExampleShaderFilename = "manual_bytecode/raw_reinsert_01.bin";
-		const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_cbv_bytecode.bin";
+		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_cbv_bytecode.bin";
+		const char* ExampleShaderFilename = "dxbc_re/ps_plain_add_coords_bytecode.bin";
 
-		//{
-		//	FuzzGenerateD3DBytecodeState FuzzBytecodeState;
-		//	GenerateBytecodeOpcodes(&FuzzBytecodeState);
-		//}
-
-
-		void* FileData = nullptr;
-		int32 FileSize = 0;
-		ReadDataFromFile(ExampleShaderFilename, &FileData, &FileSize);
-
-		ParseDXBCCode((byte*)FileData, FileSize);
+		{
+			FuzzDXBCState DXBCFuzzer;
+			GenerateShaderDXBC(&DXBCFuzzer);
 		
-		ID3DBlob* Disasm = nullptr;
-		HRESULT hr = D3DDisassemble(FileData, FileSize, 0, nullptr, &Disasm);
-		ASSERT(SUCCEEDED(hr));
+			//ParseDXBCCode((byte*)FileData, FileSize);
+		}
 
-		WriteDataToFile("manual_bytecode/raw_reinsert_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
+
+		//void* FileData = nullptr;
+		//int32 FileSize = 0;
+		//ReadDataFromFile(ExampleShaderFilename, &FileData, &FileSize);
+		//
+		//ParseDXBCCode((byte*)FileData, FileSize);
+
+		//ID3DBlob* Disasm = nullptr;
+		//HRESULT hr = D3DDisassemble(FileData, FileSize, 0, nullptr, &Disasm);
+		//ASSERT(SUCCEEDED(hr));
+		//
+		//WriteDataToFile("manual_bytecode/raw_reinsert_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
 
 
 		return 0;

@@ -257,6 +257,19 @@ enum OpcodeExtensionType
 	OpcodeExtensionType_ResourceReturnType
 };
 
+enum PSInputInterpolationMode
+{
+	PSInputInterpolationMode_Undefined,
+	PSInputInterpolationMode_Constant,
+	PSInputInterpolationMode_Linear,
+	PSInputInterpolationMode_LinearCentroid,
+	PSInputInterpolationMode_LinearNoPerspective,
+	PSInputInterpolationMode_LinearNoPerspectiveCentroid,
+	PSInputInterpolationMode_LinearSample,
+	PSInputInterpolationMode_LinearNoPerspectiveSample,
+	PSInputInterpolationMode_Count
+};
+
 struct D3DOpcode
 {
 	struct IODecl
@@ -292,6 +305,17 @@ struct D3DOpcode
 			IODecl Decl;
 			OperandSemantic Semantic;
 		} OutputDeclarationSIV;
+
+		struct {
+			IODecl Decl;
+			OperandSemantic Semantic;
+			PSInputInterpolationMode InterpolationMode;
+		} PSInputDeclarationSIV;
+
+		struct {
+			IODecl Decl;
+			PSInputInterpolationMode InterpolationMode;
+		} PSInputDeclaration;
 
 		struct {
 			bool IsDynamicIndexed;
@@ -565,6 +589,18 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		OpCode.OutputDeclarationSIV.Decl = ParseIODeclFromCursor(Cursor);
 		uint32 SemanticDWORD = GetValueFromCursor<uint32>(Cursor);
 		OpCode.OutputDeclarationSIV.Semantic = GetBitsFromWord<0, 15, OperandSemantic>(SemanticDWORD);
+	}
+	else if (OpCode.Type == D3DOpcodeType_DCL_INPUT_PS_SIV)
+	{
+		OpCode.PSInputDeclarationSIV.Decl = ParseIODeclFromCursor(Cursor);
+		uint32 SemanticDWORD = GetValueFromCursor<uint32>(Cursor);
+		OpCode.PSInputDeclarationSIV.Semantic = GetBitsFromWord<0, 15, OperandSemantic>(SemanticDWORD);
+		OpCode.PSInputDeclarationSIV.InterpolationMode = GetBitsFromWord<11, 14, PSInputInterpolationMode>(OpcodeStartDWORD);
+	}
+	else if (OpCode.Type == D3DOpcodeType_DCL_INPUT_PS)
+	{
+		OpCode.PSInputDeclaration.Decl = ParseIODeclFromCursor(Cursor);
+		OpCode.PSInputDeclaration.InterpolationMode = GetBitsFromWord<11, 14, PSInputInterpolationMode>(OpcodeStartDWORD);
 	}
 	else if (OpCode.Type == D3DOpcodeType_DCL_TEMPS)
 	{
@@ -1138,6 +1174,37 @@ void ShaderDeclareOutput_SIV(D3DOpcodeState* Bytecode, int32 RegisterIndex, Oper
 	Bytecode->Opcodes.push_back(OpcodeDWORD);
 }
 
+void ShaderDeclareInputPS(D3DOpcodeState* Bytecode, int32 RegisterIndex, PSInputInterpolationMode InterpolationMode, byte InputMask = 0x0F)
+{
+	uint32 OpcodeDWORD = 0;
+	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_DCL_INPUT_PS);
+	SetBitsFromWord<24, 30>(&OpcodeDWORD, 3); // Set length to 3 DWORDs (including this one)
+	SetBitsFromWord<11, 14>(&OpcodeDWORD, InterpolationMode);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
+
+	auto Operand = BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(RegisterIndex), BytecodeOperandSwizzling(), InputMask);
+	ShaderWriteOperand(Bytecode, Operand);
+}
+
+void ShaderDeclareInputPS_SIV(D3DOpcodeState* Bytecode, int32 RegisterIndex, OperandSemantic Semantic, PSInputInterpolationMode InterpolationMode, byte OutputMask = 0x0F)
+{
+	uint32 OpcodeDWORD = 0;
+	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_DCL_INPUT_PS_SIV);
+	SetBitsFromWord<24, 30>(&OpcodeDWORD, 4); // Set length to 4 DWORDs (including this one)
+	SetBitsFromWord<11, 14>(&OpcodeDWORD, InterpolationMode);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
+
+	auto Operand = BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(RegisterIndex), BytecodeOperandSwizzling(), OutputMask);
+	ShaderWriteOperand(Bytecode, Operand);
+
+	{
+		uint32 SemanticDWORD = 0;
+		SetBitsFromWord<0, 15>(&OpcodeDWORD, Semantic);
+	}
+
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
+}
+
 void ShaderDeclareCBVImm(D3DOpcodeState* Bytecode, int32 RegisterIndex, int32 SizeInBytes)
 {
 
@@ -1208,8 +1275,20 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 
 	// Generate declarations
 	ShaderDeclareGlobalFlags(Bytecode, true);
-	ShaderDeclareInput(Bytecode, 0);
-	ShaderDeclareOutput_SIV(Bytecode, 0, OperandSemantic_Position);
+
+	if (Bytecode->ShaderType == D3DShaderType::Vertex)
+	{
+		ShaderDeclareInput(Bytecode, 0);
+		ShaderDeclareOutput_SIV(Bytecode, 0, OperandSemantic_Position);
+		ShaderDeclareOutput(Bytecode, 1);
+	}
+	else if (Bytecode->ShaderType == D3DShaderType::Pixel)
+	{
+		ShaderDeclareInputPS_SIV(Bytecode, 0, OperandSemantic_Position, PSInputInterpolationMode_LinearNoPerspective);
+		ShaderDeclareInputPS(Bytecode, 1, PSInputInterpolationMode_Linear);
+		ShaderDeclareOutput(Bytecode, 0);
+	}
+	
 	ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
 	ShaderReturn(Bytecode);
 
@@ -1335,6 +1414,7 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 
 	// NoPreShader...not sure if we should put other stuff in here
 	uint32 MiscFlags = 0x100;
+	WriteU32ToUCharVectorLE(OutData, MiscFlags);
 
 	int32 CreatorNameOffsetIndex = OutData->size();
 	// Placeholder for offset to creator string
@@ -1568,6 +1648,9 @@ void GenerateIOSignatureChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutDat
 		// Masks (first is declaration, second is read/write)
 		OutData->push_back(0x0F);
 		OutData->push_back(0x0F);
+
+		// ??? Is this padding, or some new stuff in SM 5.0 ?
+		WriteU16ToUCharVectorLE(OutData, 0);
 	}
 
 	for (int32 SignatureIndex = 0; SignatureIndex < Semantics.size(); SignatureIndex++)
@@ -1576,7 +1659,16 @@ void GenerateIOSignatureChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutDat
 		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, ElementNameOffsetIndex);
 
 		WriteStringtoUCharVector(OutData, GetSemanticNameFromSemantic(Semantics[SignatureIndex]));
+
+		// Uhhh...padding?
+		while (OutData->size() % 4 != 0)
+		{
+			OutData->push_back(0xAB);
+		}
 	}
+
+	// Now that we know the chunk size, go back and fix it up
+	WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, ChunkSizeIndex);
 }
 
 void GenerateSHEXChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
@@ -1625,14 +1717,18 @@ void GenerateSTATChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 	// 8 bytes of the header
 	int32 ChunkSize = 148;
 	WriteU32ToUCharVectorLE(OutData, ChunkSize);
+
+	OutData->resize(OutData->size() + ChunkSize);
 }
 
 void GenerateShaderBytecode(D3DOpcodeState* Opcodes, std::vector<byte>* OutBytecode)
 {
 	DXBCFileHeader DXBCHeader = {};
-	DXBCHeader.ChunkCount = 5; // ?
-	DXBCHeader.FileSizeInBytes = 0;
-	DXBCHeader.Unknown = 0;
+	DXBCHeader.MagicNumbers[0] = 'D';
+	DXBCHeader.MagicNumbers[1] = 'X';
+	DXBCHeader.MagicNumbers[2] = 'B';
+	DXBCHeader.MagicNumbers[3] = 'C';
+	DXBCHeader.ChunkCount = 5;
 
 	// Write the header, and write each chunk
 	OutBytecode->resize(sizeof(DXBCFileHeader));
@@ -1651,10 +1747,26 @@ void GenerateShaderBytecode(D3DOpcodeState* Opcodes, std::vector<byte>* OutBytec
 
 	GenerateRDEFChunk(Opcodes, OutBytecode);
 
+	WriteU32ToUCharVectorLE(OutBytecode, OutBytecode->size(), ChunkOffsetsStartIndex + 4);
 	GenerateIOSignatureChunk(Opcodes, OutBytecode, true);
+
+	WriteU32ToUCharVectorLE(OutBytecode, OutBytecode->size(), ChunkOffsetsStartIndex + 8);
 	GenerateIOSignatureChunk(Opcodes, OutBytecode, false);
 
+	WriteU32ToUCharVectorLE(OutBytecode, OutBytecode->size(), ChunkOffsetsStartIndex + 12);
+	GenerateSHEXChunk(Opcodes, OutBytecode);
+
+	WriteU32ToUCharVectorLE(OutBytecode, OutBytecode->size(), ChunkOffsetsStartIndex + 16);
+	GenerateSTATChunk(Opcodes, OutBytecode);
+
 	// Fix up the header now that we know the length/checksum, and also fix up offsets to each chunk
+	DXBCHeader.FileSizeInBytes = OutBytecode->size();
+	// NOTE: There's probably a better way of doing this, but the first memcpy replaces the length field,
+	// which is needed since the length is part of the hash, honestly I'd rather not debug weird offset thingys anymore
+	memcpy(OutBytecode->data(), &DXBCHeader, sizeof(DXBCFileHeader));
+
+	dxbcHash(&(*OutBytecode)[20], OutBytecode->size() - 20, DXBCHeader.CheckSum);
+	memcpy(OutBytecode->data(), &DXBCHeader, sizeof(DXBCFileHeader));
 }
 
 
@@ -1677,7 +1789,27 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	GenerateShaderBytecode(&VertShader, &VSBytecode);
 	GenerateShaderBytecode(&PixelShader, &PSBytecode);
 
+	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
+	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
+
+	ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
+	ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
+
 	HRESULT hr;
+	{
+		ID3DBlob* VSDisasmBlob = nullptr;
+		hr = D3DDisassemble(VSBytecode.data(), VSBytecode.size(), 0, nullptr, &VSDisasmBlob);
+		ASSERT(SUCCEEDED(hr));
+
+		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01_disasm.txt").buffer, VSDisasmBlob->GetBufferPointer(), VSDisasmBlob->GetBufferSize());
+
+		ID3DBlob* PSDisasmBlob = nullptr;
+		hr = D3DDisassemble(PSBytecode.data(), PSBytecode.size(), 0, nullptr, &PSDisasmBlob);
+		ASSERT(SUCCEEDED(hr));
+
+		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01_disasm.txt").buffer, PSDisasmBlob->GetBufferPointer(), PSDisasmBlob->GetBufferSize());
+	}
+
 	hr = D3DCreateBlob(VSBytecode.size(), &DXBCState->VSBlob);
 	ASSERT(SUCCEEDED(hr));
 	memcpy(DXBCState->VSBlob->GetBufferPointer(), VSBytecode.data(), VSBytecode.size());
