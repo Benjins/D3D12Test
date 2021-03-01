@@ -5,6 +5,8 @@
 
 #include "dxbc_hash.h"
 
+#include "string_stack_buffer.h"
+
 #include <vector>
 
 #pragma pack(push)
@@ -14,7 +16,7 @@ struct DXBCFileHeader
 {
 	char MagicNumbers[4] = {};
 	byte CheckSum[16] = {};
-	uint32 Unknown = 0;
+	uint32 Unknown = 0x01;
 	uint32 FileSizeInBytes = 0;
 	uint32 ChunkCount = 0;
 };
@@ -200,6 +202,18 @@ enum OperandSemantic
 	OperandSemantic_Position,
 	OperandSemantic_Count,
 };
+
+inline OperandSemantic ShaderSemanticToOperandSemantic(ShaderSemantic Sementic)
+{
+	if (Sementic == ShaderSemantic::SV_POSITION)
+	{
+		return OperandSemantic_Position;
+	}
+	else
+	{
+		return OperandSemantic_Undefined;
+	}
+}
 
 enum SamplerMode {
 	SamplerMode_Default,
@@ -763,6 +777,10 @@ void ParseDXBCCode(byte* Code, int32 Length)
 					uint16 VarArrayCount = GetValueFromCursor<uint16>(&VarTypeCursor);
 					uint16 VarMemberCount = GetValueFromCursor<uint16>(&VarTypeCursor);
 					uint16 VarMemberOffset = GetValueFromCursor<uint16>(&VarTypeCursor);
+
+					int xc = 0;
+					xc++;
+					(void)xc;
 				}
 
 			}
@@ -1224,22 +1242,419 @@ void RandomiseShaderBytecodeParams(FuzzDXBCState* DXBCState, D3DOpcodeState* VSO
 	// TODO: Add random ones as well
 }
 
-void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<unsigned char>* OutData)
+// Little-endian, as god intended
+void WriteU32ToUCharVectorLE(std::vector<byte>* OutData, uint32 Val, int32 Index = -1)
 {
-
+	if (Index == -1)
+	{
+		for (int32 i = 0; i < 4; i++)
+		{
+			OutData->push_back((byte)((Val >> (i * 8)) & 0xFF));
+		}
+	}
+	else
+	{
+		ASSERT(Index >= 0 && Index < OutData->size() - 4);
+		for (int32 i = 0; i < 4; i++)
+		{
+			(*OutData)[Index + i] = ((byte)((Val >> (i * 8)) & 0xFF));
+		}
+	}
 }
 
-void GenerateShaderBytecode(D3DOpcodeState* Opcodes, std::vector<unsigned char>* OutBytecode)
+void WriteU16ToUCharVectorLE(std::vector<byte>* OutData, uint16 Val, int32 Index = -1)
+{
+	if (Index == -1)
+	{
+		for (int32 i = 0; i < 2; i++)
+		{
+			OutData->push_back((byte)((Val >> (i * 8)) & 0xFF));
+		}
+	}
+	else
+	{
+		ASSERT(Index >= 0 && Index < OutData->size() - 2);
+		for (int32 i = 0; i < 2; i++)
+		{
+			(*OutData)[Index + i] = ((byte)((Val >> (i * 8)) & 0xFF));
+		}
+	}
+}
+
+void WriteStringtoUCharVector(std::vector<byte>* OutData, const char* Str)
+{
+	// Include the null byte in this
+	int32 Len = strlen(Str) + 1;
+	int32 CurrentDataSize = OutData->size();
+	OutData->resize(CurrentDataSize + Len);
+	memcpy(OutData->data() + CurrentDataSize, Str, Len);
+}
+
+void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
+{
+	const uint32 ChunkMagic = 0x46454452;
+	WriteU32ToUCharVectorLE(OutData, ChunkMagic);
+
+	int32 ChunkSizeIndex = OutData->size();
+	// Placeholder for size, we will fix up later
+	WriteU32ToUCharVectorLE(OutData, 0);
+
+	int32 ChunkDataStartIndex = OutData->size();
+
+	WriteU32ToUCharVectorLE(OutData, Opcodes->CBVSizes.size());
+
+	int32 CBVOffsetIndex = OutData->size();
+	// Placeholder for CBV offset, we will fix up later
+	WriteU32ToUCharVectorLE(OutData, 0);
+
+	WriteU32ToUCharVectorLE(OutData, Opcodes->CBVSizes.size());
+
+	int32 RDefOffsetIndex = OutData->size();
+	// Placeholder for resource definitions offset, we will fix up later
+	WriteU32ToUCharVectorLE(OutData, 0);
+
+	// Minor version number, major version number
+	OutData->push_back(0);
+	OutData->push_back(5);
+
+	// Shader type
+	if (Opcodes->ShaderType == D3DShaderType::Vertex)
+	{
+		OutData->push_back(0xFE);
+		OutData->push_back(0xFF);
+	}
+	else if (Opcodes->ShaderType == D3DShaderType::Pixel)
+	{
+		OutData->push_back(0xFF);
+		OutData->push_back(0xFF);
+	}
+	else
+	{
+		ASSERT(false);
+	}
+
+	// NoPreShader...not sure if we should put other stuff in here
+	uint32 MiscFlags = 0x100;
+
+	int32 CreatorNameOffsetIndex = OutData->size();
+	// Placeholder for offset to creator string
+	WriteU32ToUCharVectorLE(OutData, 0);
+
+	const uint32 RD114CC = 0x31314452;
+	WriteU32ToUCharVectorLE(OutData, RD114CC);
+
+	// Unknown, going off of what's produced by D3DCompile
+	WriteU32ToUCharVectorLE(OutData, 0x3C);
+	WriteU32ToUCharVectorLE(OutData, 0x18);
+	WriteU32ToUCharVectorLE(OutData, 0x20);
+	WriteU32ToUCharVectorLE(OutData, 0x28);
+	WriteU32ToUCharVectorLE(OutData, 0x24);
+	WriteU32ToUCharVectorLE(OutData, 0x0C);
+
+	uint32 InterfaceSlotCount = 0;
+	WriteU32ToUCharVectorLE(OutData, InterfaceSlotCount);
+
+	std::vector<int32> CBVNameOffsetIndices;
+	CBVNameOffsetIndices.reserve(Opcodes->CBVSizes.size());
+
+	std::vector<int32> CBVVariableDescOffsetIndices;
+	CBVVariableDescOffsetIndices.reserve(Opcodes->CBVSizes.size());
+
+	for (int32 CBVSize : Opcodes->CBVSizes)
+	{
+		CBVNameOffsetIndices.push_back(OutData->size());
+		// Placeholder for CBV name offset, we will fix up later
+		WriteU32ToUCharVectorLE(OutData, 0);
+
+		// Number of variables
+		WriteU32ToUCharVectorLE(OutData, CBVSize);
+
+		CBVVariableDescOffsetIndices.push_back(OutData->size());
+		// Placeholder for CBV variable descriptions offset, we will fix up later
+		WriteU32ToUCharVectorLE(OutData, 0);
+
+		// CBV size in bytes, not numbers of float4 registers
+		WriteU32ToUCharVectorLE(OutData, CBVSize * 16);
+
+		// Flags, which are none
+		WriteU32ToUCharVectorLE(OutData, 0);
+
+		// D3D11_CT_CBUFFER type
+		WriteU32ToUCharVectorLE(OutData, 0);
+	}
+
+	int32 NumResources = Opcodes->CBVSizes.size() + Opcodes->NumSamplers + Opcodes->NumTextures;
+	std::vector<int32> ResourceBindingNameOffsetIndices;
+	ResourceBindingNameOffsetIndices.reserve(NumResources);
+
+	auto AddResource = [&](uint32 ResourceType, int32 BindIndex) {
+		ResourceBindingNameOffsetIndices.push_back(OutData->size());
+		// Placeholder for resource name offset, we will fix up later
+		WriteU32ToUCharVectorLE(OutData, 0);
+
+		// Resource type (0 = cbv, 2 = texture, 3 = sampler)
+		WriteU32ToUCharVectorLE(OutData, ResourceType);
+
+		// Resource return type
+		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? 5 : 0);
+
+		// Resource view dimension
+		// TODO: Other texture dimensions
+		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? 5 : 0);
+
+		// Number of samples
+		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? -1 : 0);
+
+		// Bind point
+		WriteU32ToUCharVectorLE(OutData, BindIndex);
+
+		// Bind count
+		WriteU32ToUCharVectorLE(OutData, 1);
+
+		// Shader flags
+		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? 0x0C : 0);
+	};
+
+	for (int32 CBVIndex = 0; CBVIndex < Opcodes->CBVSizes.size(); CBVIndex++)
+	{
+		AddResource(0, CBVIndex);
+	}
+
+	for (int32 TextureIndex = 0; TextureIndex < Opcodes->NumTextures; TextureIndex++)
+	{
+		AddResource(2, TextureIndex);
+	}
+
+	for (int32 SamplerIndex = 0; SamplerIndex < Opcodes->NumSamplers; SamplerIndex++)
+	{
+		AddResource(3, SamplerIndex);
+	}
+
+	for (int32 CBVIndex = 0; CBVIndex < CBVNameOffsetIndices.size(); CBVIndex++)
+	{
+		int32 CBVNameOffsetIndex = CBVNameOffsetIndices[CBVIndex];
+		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, CBVNameOffsetIndex);
+
+		WriteStringtoUCharVector(OutData, StringStackBuffer<256>("res_%d", CBVIndex).buffer);
+	}
+
+	std::vector<int32> CBVVarNameOffsetIndices;
+	std::vector<int32> CBVVarTypeOffsetIndices;
+	for (int32 CBVIndex = 0; CBVIndex < CBVVariableDescOffsetIndices.size(); CBVIndex++)
+	{
+		int32 CBVVariableDescOffsetIndex = CBVVariableDescOffsetIndices[CBVIndex];
+		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, CBVVariableDescOffsetIndex);
+
+		int32 VarCount = Opcodes->CBVSizes[CBVIndex];
+		for (int32 VarIdx = 0; VarIdx < VarCount; VarIdx++)
+		{
+			CBVVarNameOffsetIndices.push_back(OutData->size());
+			// Placeholder for CBV name offset, we will fix up later
+			WriteU32ToUCharVectorLE(OutData, 0);
+
+			// Offset of variable w/in CBV in bytes
+			WriteU32ToUCharVectorLE(OutData, 16 * VarIdx);
+			// Size of variable in bytes
+			WriteU32ToUCharVectorLE(OutData, 16);
+			
+			// Flags (0x02 means it's used in the shader...which might not be true?)
+			WriteU32ToUCharVectorLE(OutData, 0x02);
+
+			CBVVarTypeOffsetIndices.push_back(OutData->size());
+			// Placeholder for CBV type offset, we will fix up later
+			WriteU32ToUCharVectorLE(OutData, 0);
+
+			// Offset to default value, we can just put this as 0 and it won't try to read it
+			WriteU32ToUCharVectorLE(OutData, 0);
+		}
+	}
+
+	ASSERT(CBVVarNameOffsetIndices.size() == CBVVarTypeOffsetIndices.size());
+
+	for (int32 CBVVarIndex = 0; CBVVarIndex < CBVVarNameOffsetIndices.size(); CBVVarIndex++)
+	{
+		int32 CBVVarNameOffsetIndex = CBVVarNameOffsetIndices[CBVVarIndex];
+		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, CBVVarNameOffsetIndex);
+
+		WriteStringtoUCharVector(OutData, StringStackBuffer<256>("cb_var_%d", CBVVarIndex).buffer);
+	}
+
+	for (int32 CBVVarIndex = 0; CBVVarIndex < CBVVarTypeOffsetIndices.size(); CBVVarIndex++)
+	{
+		int32 CBVVarTypeOffsetIndex = CBVVarTypeOffsetIndices[CBVVarIndex];
+		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, CBVVarTypeOffsetIndex);
+
+		// Variable class (D3D_SVC_VECTOR)
+		WriteU16ToUCharVectorLE(OutData, 0x01);
+
+		// Variable type (D3D_SVT_FLOAT)
+		WriteU16ToUCharVectorLE(OutData, 0x03);
+
+		// Number of rows
+		WriteU16ToUCharVectorLE(OutData, 1);
+		// Number of columns
+		WriteU16ToUCharVectorLE(OutData, 4);
+
+		// Array size (irrelevant for vectors)
+		WriteU16ToUCharVectorLE(OutData, 0);
+
+		// Number of members ina  struct (irrelevant for vectors)
+		WriteU16ToUCharVectorLE(OutData, 0);
+
+		// Offset from chunk data start to first member (irrelevant for vectors)
+		WriteU16ToUCharVectorLE(OutData, 0);
+	}
+
+	for (int32 ResIndex = 0; ResIndex < ResourceBindingNameOffsetIndices.size(); ResIndex++)
+	{
+		int32 ResourceBindingNameOffsetIndex = ResourceBindingNameOffsetIndices[ResIndex];
+		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, ResourceBindingNameOffsetIndex);
+
+		WriteStringtoUCharVector(OutData, StringStackBuffer<256>("res_%d", ResIndex).buffer);
+	}
+
+	{
+		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, CreatorNameOffsetIndex);
+
+		// I'm just gonna guess that maybe some driver detects non-MS compilers and does some different path,
+		// so for now let's just play it safe and pretend we're coming out of the official compiler
+		WriteStringtoUCharVector(OutData, "Microsoft (R) HLSL Shader Compiler 10.1");
+	}
+
+	// Now that we know the chunk size, go back and fix it up
+	WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, ChunkSizeIndex);
+}
+
+void GenerateIOSignatureChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData, bool IsInput)
+{
+	const uint32 ChunkMagic = IsInput ? 0x4E475349 : 0x4E47534F;
+	WriteU32ToUCharVectorLE(OutData, ChunkMagic);
+
+	int32 ChunkSizeIndex = OutData->size();
+	// Placeholder for size, we will fix up later
+	WriteU32ToUCharVectorLE(OutData, 0);
+
+	int32 ChunkDataStartIndex = OutData->size();
+
+	const auto& Semantics = IsInput ? Opcodes->InputSemantics : Opcodes->OutputSemantics;
+
+	WriteU32ToUCharVectorLE(OutData, Semantics.size());
+
+	// ???
+	uint32 MaybeFlags = 0x08;
+	WriteU32ToUCharVectorLE(OutData, MaybeFlags);
+
+	std::vector<int32> ElementNameOffsetIndices;
+	ElementNameOffsetIndices.reserve(Semantics.size());
+
+	for (int32 SignatureIndex = 0; SignatureIndex < Semantics.size(); SignatureIndex++)
+	{
+		ElementNameOffsetIndices.push_back(OutData->size());
+		// Placeholder for element name offset, we will fix up later
+		WriteU32ToUCharVectorLE(OutData, 0);
+
+		// Semantic index (always 0, we never re-use semantics)
+		WriteU32ToUCharVectorLE(OutData, 0);
+
+		// System semantic
+		WriteU32ToUCharVectorLE(OutData, ShaderSemanticToOperandSemantic(Semantics[SignatureIndex]));
+
+		// Type (3 = floating point)
+		WriteU32ToUCharVectorLE(OutData, 0x03);
+
+		// Register
+		WriteU32ToUCharVectorLE(OutData, SignatureIndex);
+
+		// Masks (first is declaration, second is read/write)
+		OutData->push_back(0x0F);
+		OutData->push_back(0x0F);
+	}
+
+	for (int32 SignatureIndex = 0; SignatureIndex < Semantics.size(); SignatureIndex++)
+	{
+		int32 ElementNameOffsetIndex = ElementNameOffsetIndices[SignatureIndex];
+		WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, ElementNameOffsetIndex);
+
+		WriteStringtoUCharVector(OutData, GetSemanticNameFromSemantic(Semantics[SignatureIndex]));
+	}
+}
+
+void GenerateSHEXChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
+{
+	int32 NumberOfBytes = Opcodes->Opcodes.size() * 4;
+
+	const uint32 ChunkMagic = 0x58454853;
+	WriteU32ToUCharVectorLE(OutData, ChunkMagic);
+
+	// 8 bytes of the header
+	int32 ChunkSize = NumberOfBytes + 8;
+	WriteU32ToUCharVectorLE(OutData, ChunkSize);
+
+	// Version: major version is high nibble (5), minor version is low nibble (0)
+	OutData->push_back(0x50);
+	// Uhhh....idk
+	OutData->push_back(0x00);
+
+	if (Opcodes->ShaderType == D3DShaderType::Vertex)
+	{
+		WriteU16ToUCharVectorLE(OutData, 0x01);
+	}
+	else if (Opcodes->ShaderType == D3DShaderType::Pixel)
+	{
+		WriteU16ToUCharVectorLE(OutData, 0x00);
+	}
+	else
+	{
+		ASSERT(false);
+	}
+
+	WriteU32ToUCharVectorLE(OutData, Opcodes->Opcodes.size());
+
+	int32 OpcodeStartIndex = OutData->size();
+	OutData->resize(OutData->size() + NumberOfBytes);
+	memcpy(OutData->data() + OpcodeStartIndex, Opcodes->Opcodes.data(), NumberOfBytes);
+}
+
+void GenerateSTATChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
+{
+	// TODO: Does this really matter?
+
+	const uint32 ChunkMagic = 0x58454853;
+	WriteU32ToUCharVectorLE(OutData, ChunkMagic);
+
+	// 8 bytes of the header
+	int32 ChunkSize = 148;
+	WriteU32ToUCharVectorLE(OutData, ChunkSize);
+}
+
+void GenerateShaderBytecode(D3DOpcodeState* Opcodes, std::vector<byte>* OutBytecode)
 {
 	DXBCFileHeader DXBCHeader = {};
-	DXBCHeader.ChunkCount = 6; // ?
+	DXBCHeader.ChunkCount = 5; // ?
 	DXBCHeader.FileSizeInBytes = 0;
 	DXBCHeader.Unknown = 0;
 
+	// Write the header, and write each chunk
+	OutBytecode->resize(sizeof(DXBCFileHeader));
+	memcpy(OutBytecode->data(), &DXBCHeader, sizeof(DXBCFileHeader));
 
+	int32 ChunkOffsetsStartIndex = OutBytecode->size();
 
+	for (int32 i = 0; i < DXBCHeader.ChunkCount; i++)
+	{
+		// Write in a placeholder 0, we will come back later
+		WriteU32ToUCharVectorLE(OutBytecode, 0);
+	}
 
-	// Fix up the header now that we know the length/checksum, and 
+	// Write back the first chunk offset, since we're about to start the first chunk
+	WriteU32ToUCharVectorLE(OutBytecode, OutBytecode->size(), ChunkOffsetsStartIndex);
+
+	GenerateRDEFChunk(Opcodes, OutBytecode);
+
+	GenerateIOSignatureChunk(Opcodes, OutBytecode, true);
+	GenerateIOSignatureChunk(Opcodes, OutBytecode, false);
+
+	// Fix up the header now that we know the length/checksum, and also fix up offsets to each chunk
 }
 
 
@@ -1256,8 +1671,8 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	GenerateBytecodeOpcodes(DXBCState, &VertShader);
 	GenerateBytecodeOpcodes(DXBCState, &PixelShader);
 
-	std::vector<unsigned char> VSBytecode;
-	std::vector<unsigned char> PSBytecode;
+	std::vector<byte> VSBytecode;
+	std::vector<byte> PSBytecode;
 
 	GenerateShaderBytecode(&VertShader, &VSBytecode);
 	GenerateShaderBytecode(&PixelShader, &PSBytecode);
