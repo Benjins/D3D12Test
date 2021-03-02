@@ -362,7 +362,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			LARGE_INTEGER PerfStart;
 			QueryPerformanceCounter(&PerfStart);
 			
-			const int32 TestCases = 10;// 100;
+			const int32 TestCases = 1;// 100;
 
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;
