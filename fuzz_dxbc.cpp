@@ -1280,12 +1280,12 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 	{
 		ShaderDeclareInput(Bytecode, 0);
 		ShaderDeclareOutput_SIV(Bytecode, 0, OperandSemantic_Position);
-		ShaderDeclareOutput(Bytecode, 1);
+		//ShaderDeclareOutput(Bytecode, 1);
 	}
 	else if (Bytecode->ShaderType == D3DShaderType::Pixel)
 	{
 		ShaderDeclareInputPS_SIV(Bytecode, 0, OperandSemantic_Position, PSInputInterpolationMode_LinearNoPerspective);
-		ShaderDeclareInputPS(Bytecode, 1, PSInputInterpolationMode_Linear);
+		//ShaderDeclareInputPS(Bytecode, 1, PSInputInterpolationMode_Linear);
 		ShaderDeclareOutput(Bytecode, 0);
 	}
 	
@@ -1647,7 +1647,7 @@ void GenerateIOSignatureChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutDat
 
 		// Masks (first is declaration, second is read/write)
 		OutData->push_back(0x0F);
-		OutData->push_back(0x0F);
+		OutData->push_back(0x00);
 
 		// ??? Is this padding, or some new stuff in SM 5.0 ?
 		WriteU16ToUCharVectorLE(OutData, 0);
@@ -1700,7 +1700,7 @@ void GenerateSHEXChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 		ASSERT(false);
 	}
 
-	WriteU32ToUCharVectorLE(OutData, Opcodes->Opcodes.size());
+	WriteU32ToUCharVectorLE(OutData, Opcodes->Opcodes.size() + 2);
 
 	int32 OpcodeStartIndex = OutData->size();
 	OutData->resize(OutData->size() + NumberOfBytes);
@@ -1711,7 +1711,8 @@ void GenerateSTATChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 {
 	// TODO: Does this really matter?
 
-	const uint32 ChunkMagic = 0x58454853;
+	// 53 54 41 54
+	const uint32 ChunkMagic = 0x54415453;
 	WriteU32ToUCharVectorLE(OutData, ChunkMagic);
 
 	// 8 bytes of the header
@@ -1789,26 +1790,26 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	GenerateShaderBytecode(&VertShader, &VSBytecode);
 	GenerateShaderBytecode(&PixelShader, &PSBytecode);
 
-	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
-	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
+	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
+	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
 
-	ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
-	ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
+	//ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
+	//ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
 
 	HRESULT hr;
-	{
-		ID3DBlob* VSDisasmBlob = nullptr;
-		hr = D3DDisassemble(VSBytecode.data(), VSBytecode.size(), 0, nullptr, &VSDisasmBlob);
-		ASSERT(SUCCEEDED(hr));
-
-		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01_disasm.txt").buffer, VSDisasmBlob->GetBufferPointer(), VSDisasmBlob->GetBufferSize());
-
-		ID3DBlob* PSDisasmBlob = nullptr;
-		hr = D3DDisassemble(PSBytecode.data(), PSBytecode.size(), 0, nullptr, &PSDisasmBlob);
-		ASSERT(SUCCEEDED(hr));
-
-		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01_disasm.txt").buffer, PSDisasmBlob->GetBufferPointer(), PSDisasmBlob->GetBufferSize());
-	}
+	//{
+	//	ID3DBlob* VSDisasmBlob = nullptr;
+	//	hr = D3DDisassemble(VSBytecode.data(), VSBytecode.size(), 0, nullptr, &VSDisasmBlob);
+	//	ASSERT(SUCCEEDED(hr));
+	//
+	//	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01_disasm.txt").buffer, VSDisasmBlob->GetBufferPointer(), VSDisasmBlob->GetBufferSize());
+	//
+	//	ID3DBlob* PSDisasmBlob = nullptr;
+	//	hr = D3DDisassemble(PSBytecode.data(), PSBytecode.size(), 0, nullptr, &PSDisasmBlob);
+	//	ASSERT(SUCCEEDED(hr));
+	//
+	//	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01_disasm.txt").buffer, PSDisasmBlob->GetBufferPointer(), PSDisasmBlob->GetBufferSize());
+	//}
 
 	hr = D3DCreateBlob(VSBytecode.size(), &DXBCState->VSBlob);
 	ASSERT(SUCCEEDED(hr));

@@ -50,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 2;
+	int ChosenAdapterIndex = 1;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -261,7 +261,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		return 0;
 	}
 
-	//if (0)
+	if (0)
 	{
 		//const char* ExampleShaderFilename = "example_shaders/9795564935892538031_pixel.dxbc";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_add_bytecode.bin";
@@ -310,7 +310,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	}
 
 
-	if (0)
+	//if (0)
 	{
 		bool bIsSingleThreaded = true;
 
@@ -324,7 +324,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderConfig.PlacedResourceChance = 0;// 0.3f;
 
 		ShaderConfig.ShouldReadbackImage = true;
-		ShaderConfig.ReadbackImageNamePrepend = "image_case_";
+		ShaderConfig.ReadbackImageNamePrepend = "image_case_dxbc_fuzz_";
 
 		{
 			DXGI_ADAPTER_DESC Desc = {};
@@ -362,7 +362,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			LARGE_INTEGER PerfStart;
 			QueryPerformanceCounter(&PerfStart);
 			
-			const int32 TestCases = 100;
+			const int32 TestCases = 10;// 100;
 
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;

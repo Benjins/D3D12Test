@@ -14,6 +14,8 @@
 
 #include "fuzz_shader_compiler.h"
 
+#include "fuzz_dxbc.h"
+
 #include "shader_meta.h"
 
 #include "string_stack_buffer.h"
@@ -1894,19 +1896,28 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 
 		//--------------------
 		// HLSL AST Fuzzer path
-		CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
-
-		// Set types
-		GenerateFuzzingShader(Fuzzer, &VertShader);
-		GenerateFuzzingShader(Fuzzer, &PixelShader);
-
-		ConvertShaderASTToSourceCode(&VertShader, Fuzzer->Config);
-		ConvertShaderASTToSourceCode(&PixelShader, Fuzzer->Config);
-
-		VerifyShaderCompilation(&VertShader);
-		VerifyShaderCompilation(&PixelShader);
+		//CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
+		//
+		//// Set types
+		//GenerateFuzzingShader(Fuzzer, &VertShader);
+		//GenerateFuzzingShader(Fuzzer, &PixelShader);
+		//
+		//ConvertShaderASTToSourceCode(&VertShader, Fuzzer->Config);
+		//ConvertShaderASTToSourceCode(&PixelShader, Fuzzer->Config);
+		//
+		//VerifyShaderCompilation(&VertShader);
+		//VerifyShaderCompilation(&PixelShader);
 		//--------------------
 		// TODO: DXBC Bytecode Fuzzer path
+
+		FuzzDXBCState DXBCState;
+		GenerateShaderDXBC(&DXBCState);
+
+		VertShader.ByteCodeBlob = DXBCState.VSBlob;
+		PixelShader.ByteCodeBlob = DXBCState.PSBlob;
+
+		ReflectShaderIntoShaderMetadata(VertShader.ByteCodeBlob, &VertShader.ShaderMeta);
+		ReflectShaderIntoShaderMetadata(PixelShader.ByteCodeBlob, &PixelShader.ShaderMeta);
 
 		//--------------------
 
@@ -2019,7 +2030,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 			const int32 RTHeight = Fuzzer->Config->RTHeight;
 
 			char filename[256] = {};
-			snprintf(filename, sizeof(filename), "../render_output/%s%llu%s.png", Fuzzer->Config->ReadbackImageNamePrepend, Fuzzer->InitialFuzzSeed, Fuzzer->Config->ReadbackImageNameAppend);
+			snprintf(filename, sizeof(filename), "render_output/%s%llu%s.png", Fuzzer->Config->ReadbackImageNamePrepend, Fuzzer->InitialFuzzSeed, Fuzzer->Config->ReadbackImageNameAppend);
 			stbi_write_png(filename, RTWidth, RTHeight, 4, pPixelData, 0);
 
 			RTReadback->Unmap(0, nullptr);

@@ -49,6 +49,71 @@ const char* GetTargetForShaderType(D3DShaderType Type) {
 	}
 }
 
+void ReflectShaderIntoShaderMetadata(ID3DBlob* ByteCode, ShaderMetadata* OutMetadata)
+{
+	HRESULT hr;
+	ID3D12ShaderReflection* ShaderReflection = nullptr;
+	hr = D3DReflect(ByteCode->GetBufferPointer(), ByteCode->GetBufferSize(), IID_PPV_ARGS(&ShaderReflection));
+
+	D3D12_SHADER_DESC ShaderDesc = {};
+	hr = ShaderReflection->GetDesc(&ShaderDesc);
+
+	D3D12_SIGNATURE_PARAMETER_DESC InputParamDescs[MAX_INPUT_PARAM_COUNT] = {};
+
+	OutMetadata->NumParams = 0;
+
+	assert(ShaderDesc.InputParameters < MAX_INPUT_PARAM_COUNT);
+
+	for (int32 i = 0; i < ShaderDesc.InputParameters; i++)
+	{
+		hr = ShaderReflection->GetInputParameterDesc(i, &InputParamDescs[i]);
+
+		ShaderInputParamMetadata ParamMeta = {};
+		ParamMeta.Semantic = GetSemanticFromSemanticName(InputParamDescs[i].SemanticName);
+		ParamMeta.ParamIndex = InputParamDescs[i].Register;
+
+		OutMetadata->InputParamMetadata[OutMetadata->NumParams] = ParamMeta;
+		OutMetadata->NumParams++;
+	}
+
+	OutMetadata->NumCBVs = 0;
+	OutMetadata->NumSRVs = 0;
+	OutMetadata->NumStaticSamplers = 0;
+
+	assert(ShaderDesc.BoundResources < MAX_BOUND_RESOURCES);
+
+	for (int32 i = 0; i < ShaderDesc.BoundResources; i++)
+	{
+		D3D12_SHADER_INPUT_BIND_DESC BoundResourceDesc;
+		ShaderReflection->GetResourceBindingDesc(i, &BoundResourceDesc);
+
+		if (BoundResourceDesc.Type == D3D_SIT_TEXTURE)
+		{
+			OutMetadata->NumSRVs++;
+		}
+		else if (BoundResourceDesc.Type == D3D_SIT_SAMPLER)
+		{
+			OutMetadata->NumStaticSamplers++;
+		}
+		else if (BoundResourceDesc.Type == D3D_SIT_CBUFFER)
+		{
+			OutMetadata->NumCBVs++;
+		}
+	}
+
+	ASSERT(OutMetadata->NumCBVs <= MAX_CBV_COUNT);
+
+	for (int32 CBVIndex = 0; CBVIndex < OutMetadata->NumCBVs; CBVIndex++)
+	{
+		auto* CBVReflection = ShaderReflection->GetConstantBufferByIndex(CBVIndex);
+		D3D12_SHADER_BUFFER_DESC CBVDesc = {};
+		CBVReflection->GetDesc(&CBVDesc);
+
+		OutMetadata->CBVSizes[CBVIndex] = CBVDesc.Size;
+	}
+
+	ShaderReflection->Release();
+}
 
 ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, const char* ShaderSourceName, const char* EntryPoint, ShaderMetadata* OutMetadata) {
 	ID3DBlob* ByteCode = nullptr;
@@ -56,67 +121,7 @@ ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, co
 	UINT CompilerFlags = 0;// D3DCOMPILE_DEBUG;
 	HRESULT hr = D3DCompile(ShaderCode, strlen(ShaderCode), ShaderSourceName, nullptr, nullptr, EntryPoint, GetTargetForShaderType(ShaderType), CompilerFlags, 0, &ByteCode, &ErrorMsg);
 	if (SUCCEEDED(hr)) {
-		ID3D12ShaderReflection* ShaderReflection = nullptr;
-		hr = D3DReflect(ByteCode->GetBufferPointer(), ByteCode->GetBufferSize(), IID_PPV_ARGS(&ShaderReflection));
-
-		D3D12_SHADER_DESC ShaderDesc = {};
-		hr = ShaderReflection->GetDesc(&ShaderDesc);
-
-		D3D12_SIGNATURE_PARAMETER_DESC InputParamDescs[MAX_INPUT_PARAM_COUNT] = {};
-
-		OutMetadata->NumParams = 0;
-
-		assert(ShaderDesc.InputParameters < MAX_INPUT_PARAM_COUNT);
-
-		for (int32 i = 0; i < ShaderDesc.InputParameters; i++)
-		{
-			hr = ShaderReflection->GetInputParameterDesc(i, &InputParamDescs[i]);
-
-			ShaderInputParamMetadata ParamMeta = {};
-			ParamMeta.Semantic = GetSemanticFromSemanticName(InputParamDescs[i].SemanticName);
-			ParamMeta.ParamIndex = InputParamDescs[i].Register;
-
-			OutMetadata->InputParamMetadata[OutMetadata->NumParams] = ParamMeta;
-			OutMetadata->NumParams++;
-		}
-
-		OutMetadata->NumCBVs = 0;
-		OutMetadata->NumSRVs = 0;
-		OutMetadata->NumStaticSamplers = 0;
-
-		assert(ShaderDesc.BoundResources < MAX_BOUND_RESOURCES);
-
-		for (int32 i = 0; i < ShaderDesc.BoundResources; i++)
-		{
-			D3D12_SHADER_INPUT_BIND_DESC BoundResourceDesc;
-			ShaderReflection->GetResourceBindingDesc(i, &BoundResourceDesc);
-
-			if (BoundResourceDesc.Type == D3D_SIT_TEXTURE)
-			{
-				OutMetadata->NumSRVs++;
-			}
-			else if (BoundResourceDesc.Type == D3D_SIT_SAMPLER)
-			{
-				OutMetadata->NumStaticSamplers++;
-			}
-			else if (BoundResourceDesc.Type == D3D_SIT_CBUFFER)
-			{
-				OutMetadata->NumCBVs++;
-			}
-		}
-
-		ASSERT(OutMetadata->NumCBVs <= MAX_CBV_COUNT);
-
-		for (int32 CBVIndex = 0; CBVIndex < OutMetadata->NumCBVs; CBVIndex++)
-		{
-			auto* CBVReflection = ShaderReflection->GetConstantBufferByIndex(CBVIndex);
-			D3D12_SHADER_BUFFER_DESC CBVDesc = {};
-			CBVReflection->GetDesc(&CBVDesc);
-
-			OutMetadata->CBVSizes[CBVIndex] = CBVDesc.Size;
-		}
-
-		ShaderReflection->Release();
+		ReflectShaderIntoShaderMetadata(ByteCode, OutMetadata);
 
 		return ByteCode;
 	}

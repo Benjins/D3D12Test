@@ -63,4 +63,5 @@ enum struct D3DShaderType {
 const char* GetTargetForShaderType(D3DShaderType Type);
 
 
+void ReflectShaderIntoShaderMetadata(ID3DBlob* ByteCode, ShaderMetadata* OutMetadata);
 ID3DBlob* CompileShaderCode(const char* ShaderCode, D3DShaderType ShaderType, const char* ShaderSourceName, const char* EntryPoint, ShaderMetadata* OutMetadata);
