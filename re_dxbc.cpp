@@ -127,5 +127,10 @@ void SpitOutShaderInfo()
 	//	const char* PSPlain = "struct PSInput { float4 pos : SV_POSITION; float4 uvs : TEXCOORD; }; float4 Main(PSInput input) : SV_TARGET { return input.pos + input.uvs; }";
 	//	SpitOutShaderInfoFor("ps_plain_add_coords", PSPlain, D3DShaderType::Pixel);
 	//}
+	//
+	//{
+	//	const char* PSPlain = "struct PSInput { float4 pos : SV_POSITION; float4 uvs : TEXCOORD; }; Texture2D tex_1; SamplerState sampler_1; float4 Main(PSInput input) : SV_TARGET { return tex_1.SampleLevel(sampler_1, input.uvs, 0.3); }";
+	//	SpitOutShaderInfoFor("ps_plain_sample", PSPlain, D3DShaderType::Pixel);
+	//}
 }
 

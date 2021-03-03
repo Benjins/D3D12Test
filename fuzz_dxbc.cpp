@@ -639,6 +639,8 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		{
 			OpCode.ResourceDeclaration.ReturnType[i] = GetBitsFromWord<ResourceReturnType>(ReturnTypeDWORD, 4 * i, 4 * i + 3);
 		}
+
+		ASSERT(false);
 	}
 	else if (IsOpcodeGenericTernaryOp(OpCode.Type))
 	{
@@ -692,7 +694,7 @@ D3DOpcode GetD3DOpcodeFromCursor(byte** Cursor)
 		OpCode.SampleLOp.SamplerReg = ParseIODeclFromCursor(Cursor);
 		OpCode.SampleLOp.MipLevel = ParseIODeclFromCursor(Cursor);
 
-		ASSERT(false);
+		//ASSERT(false);
 	}
 	else if (OpCode.Type == D3DOpcodeType_RET)
 	{
@@ -898,11 +900,6 @@ void ParseDXBCCode(byte* Code, int32 Length)
 // --------------------------------------
 //
 
-// Planning for an alternative means of generating bytecode
-
-// TODO: Rename bytecode to opcodes? Bytecode includes metadata and other chunks
-
-
 enum struct BytecodeRegisterType
 {
 	Temp,
@@ -1000,6 +997,19 @@ struct BytecodeOperandSwizzling {
 		Swizzling[1] = (byte)InY;
 		Swizzling[2] = (byte)InZ;
 		Swizzling[3] = (byte)InW;
+	}
+
+	bool IsDefault() const
+	{
+		for (int32 i = 0; i < 4; i++)
+		{
+			if (Swizzling[i] != i)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 };
 
@@ -1108,15 +1118,15 @@ OperandSourceType OperandSourceTypeFromRegisterType(BytecodeRegisterType Registe
 void ShaderWriteOperand(D3DOpcodeState* Bytecode, const BytecodeOperand& Op)
 {
 	uint32 HeaderDWORD = 0;
-	//if (Op.Mask == 0x0F)
-	//{
-	//	SetBitsFromWord<2, 3>(&HeaderDWORD, Operand4CompSelection_Swizzle);
-	//	for (int32 i = 0; i < 4; i++)
-	//	{
-	//		SetBitsFromWord(&HeaderDWORD, 4 + 2 * i, 5 + 2 * i, Op.Swizzling.Swizzling[i]);
-	//	}
-	//}
-	//else
+	if (!Op.Swizzling.IsDefault())
+	{
+		SetBitsFromWord<2, 3>(&HeaderDWORD, Operand4CompSelection_Swizzle);
+		for (int32 i = 0; i < 4; i++)
+		{
+			SetBitsFromWord(&HeaderDWORD, 4 + 2 * i, 5 + 2 * i, Op.Swizzling.Swizzling[i]);
+		}
+	}
+	else
 	{
 		SetBitsFromWord<4, 7>(&HeaderDWORD, Op.Mask);
 	}
@@ -1129,7 +1139,7 @@ void ShaderWriteOperand(D3DOpcodeState* Bytecode, const BytecodeOperand& Op)
 		}
 		else if (Op.Register.RegType == BytecodeRegisterType::Texture)
 		{
-			SetBitsFromWord<0, 1>(&HeaderDWORD, OperandNumComponents_Four);
+			SetBitsFromWord<0, 1>(&HeaderDWORD, OperandNumComponents_Zero);
 		}
 		else
 		{
@@ -1253,7 +1263,7 @@ void ShaderDeclareTexture2DResource(D3DOpcodeState* Bytecode, int32 RegisterInde
 	SetBitsFromWord<24, 30>(&OpcodeDWORD, 4); // Set length to 3 DWORDs (including this one)
 
 	SetBitsFromWord<11, 15>(&OpcodeDWORD, ResourceDimension_Texture2D);
-	int32 SampleCount = 1;
+	int32 SampleCount = 0;
 	SetBitsFromWord<16, 22>(&OpcodeDWORD, SampleCount);
 
 	Bytecode->Opcodes.push_back(OpcodeDWORD);
@@ -1401,7 +1411,6 @@ void ShaderReturn(D3DOpcodeState* Bytecode)
 }
 
 
-// TODO: Also take shader description (resources, parameters, etc)
 void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 {
 	Bytecode->NextWrittenTempRegister = 0;
@@ -1414,6 +1423,17 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 
 	// Generate declarations
 	ShaderDeclareGlobalFlags(Bytecode, true);
+
+	for (int32 i = 0; i < Bytecode->NumSamplers; i++)
+	{
+		ShaderDeclareSampler(Bytecode, i);
+	}
+
+
+	for (int32 i = 0; i < Bytecode->NumTextures; i++)
+	{
+		ShaderDeclareTexture2DResource(Bytecode, i);
+	}
 
 	if (Bytecode->ShaderType == D3DShaderType::Vertex)
 	{
@@ -1437,9 +1457,9 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 	}
 	else if (Bytecode->ShaderType == D3DShaderType::Pixel)
 	{
-		for (int32 i = 0; i < Bytecode->OutputSemantics.size(); i++)
+		for (int32 i = 0; i < Bytecode->InputSemantics.size(); i++)
 		{
-			auto Semantic = Bytecode->OutputSemantics[i];
+			auto Semantic = Bytecode->InputSemantics[i];
 			
 			if (Semantic == ShaderSemantic::SV_POSITION)
 			{
@@ -1462,26 +1482,16 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 		ShaderDeclareNumTempRegisters(Bytecode, Bytecode->NumTempRegisters);
 	}
 
-	for (int32 i = 0; i < Bytecode->NumTextures; i++)
-	{
-		ShaderDeclareTexture2DResource(Bytecode, i);
-	}
-
-	for (int32 i = 0; i < Bytecode->NumSamplers; i++)
-	{
-		ShaderDeclareSampler(Bytecode, i);
-	}
-
 	if (Bytecode->ShaderType == D3DShaderType::Pixel)
 	{
 		ShaderSampleTextureLevel(Bytecode,
 			BytecodeOperand::OpRegister(BytecodeRegisterRef::Texture(0)),
 			BytecodeOperand::OpRegister(BytecodeRegisterRef::Sampler(0)),
-			BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)),
-			BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)),
+			BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1), BytecodeOperandSwizzling(BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::Y, BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::X), 0x0F),
+			BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)),
 			BytecodeOperand::OpFloat1(0.3f));
-		//ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.001f, 0.002f, 0.8f, 0.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)));
-		ShaderAdd(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.01f, 0.12f, 0.2f, 0.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+		//ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.001f, 0.002f, 0.8f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+		//ShaderAdd(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.01f, 0.12f, 0.2f, 0.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
 	}
 	else
 	{
@@ -1591,7 +1601,8 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 	// Placeholder for CBV offset, we will fix up later
 	WriteU32ToUCharVectorLE(OutData, 0);
 
-	WriteU32ToUCharVectorLE(OutData, Opcodes->CBVSizes.size());
+	int32 NumResources = Opcodes->CBVSizes.size() + Opcodes->NumSamplers + Opcodes->NumTextures;
+	WriteU32ToUCharVectorLE(OutData, NumResources);
 
 	int32 RDefOffsetIndex = OutData->size();
 	// Placeholder for resource definitions offset, we will fix up later
@@ -1645,6 +1656,8 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 	std::vector<int32> CBVVariableDescOffsetIndices;
 	CBVVariableDescOffsetIndices.reserve(Opcodes->CBVSizes.size());
 
+	WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, CBVOffsetIndex);
+
 	for (int32 CBVSize : Opcodes->CBVSizes)
 	{
 		CBVNameOffsetIndices.push_back(OutData->size());
@@ -1668,7 +1681,6 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 		WriteU32ToUCharVectorLE(OutData, 0);
 	}
 
-	int32 NumResources = Opcodes->CBVSizes.size() + Opcodes->NumSamplers + Opcodes->NumTextures;
 	std::vector<int32> ResourceBindingNameOffsetIndices;
 	ResourceBindingNameOffsetIndices.reserve(NumResources);
 
@@ -1685,7 +1697,16 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 
 		// Resource view dimension
 		// TODO: Other texture dimensions
-		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? 5 : 0);
+		// 0 - N/A
+		// 1 - buff
+		// 2 - 1d
+		// 3 - 1darray
+		// 4 - 2d
+		// 5 - 2darray
+		// 6 - 2d MS
+		// 7 - 2darray MS
+		// 8 - 3d
+		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? 4 : 0);
 
 		// Number of samples
 		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? -1 : 0);
@@ -1700,19 +1721,21 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 		WriteU32ToUCharVectorLE(OutData, (ResourceType == 2) ? 0x0C : 0);
 	};
 
+	WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, RDefOffsetIndex);
+
 	for (int32 CBVIndex = 0; CBVIndex < Opcodes->CBVSizes.size(); CBVIndex++)
 	{
 		AddResource(0, CBVIndex);
 	}
 
-	for (int32 TextureIndex = 0; TextureIndex < Opcodes->NumTextures; TextureIndex++)
-	{
-		AddResource(2, TextureIndex);
-	}
-
 	for (int32 SamplerIndex = 0; SamplerIndex < Opcodes->NumSamplers; SamplerIndex++)
 	{
 		AddResource(3, SamplerIndex);
+	}
+
+	for (int32 TextureIndex = 0; TextureIndex < Opcodes->NumTextures; TextureIndex++)
+	{
+		AddResource(2, TextureIndex);
 	}
 
 	for (int32 CBVIndex = 0; CBVIndex < CBVNameOffsetIndices.size(); CBVIndex++)
@@ -1852,7 +1875,15 @@ void GenerateIOSignatureChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutDat
 
 		// Masks (first is declaration, second is read/write)
 		OutData->push_back(0x0F);
-		OutData->push_back(0x00);
+		// TODO: ????????
+		if (IsInput)
+		{
+			OutData->push_back(0x0F);
+		}
+		else
+		{
+			OutData->push_back(0x00);
+		}
 
 		// ??? Is this padding, or some new stuff in SM 5.0 ?
 		WriteU16ToUCharVectorLE(OutData, 0);
@@ -1924,7 +1955,17 @@ void GenerateSTATChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 	int32 ChunkSize = 148;
 	WriteU32ToUCharVectorLE(OutData, ChunkSize);
 
+	int32 ChunkDataIndex = OutData->size();
 	OutData->resize(OutData->size() + ChunkSize);
+
+	// TODO: Just checking if this affects some PS bug I'm having atm
+	if (Opcodes->ShaderType == D3DShaderType::Pixel)
+	{
+		WriteU32ToUCharVectorLE(OutData, 2, ChunkDataIndex + 0);
+		WriteU32ToUCharVectorLE(OutData, 2, ChunkDataIndex + 12);
+		WriteU32ToUCharVectorLE(OutData, 1, ChunkDataIndex + 28);
+		WriteU32ToUCharVectorLE(OutData, 1, ChunkDataIndex + 60);
+	}
 }
 
 void GenerateShaderBytecode(D3DOpcodeState* Opcodes, std::vector<byte>* OutBytecode)
@@ -1998,11 +2039,11 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	GenerateShaderBytecode(&VertShader, &VSBytecode);
 	GenerateShaderBytecode(&PixelShader, &PSBytecode);
 
-	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
-	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
+	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
+	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
 
 	//ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
-	//ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
+	ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
 
 	HRESULT hr;
 	{
