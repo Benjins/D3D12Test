@@ -1957,18 +1957,7 @@ void GenerateSTATChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 	// 8 bytes of the header
 	int32 ChunkSize = 148;
 	WriteU32ToUCharVectorLE(OutData, ChunkSize);
-
-	int32 ChunkDataIndex = OutData->size();
 	OutData->resize(OutData->size() + ChunkSize);
-
-	// TODO: Just checking if this affects some PS bug I'm having atm
-	if (Opcodes->ShaderType == D3DShaderType::Pixel)
-	{
-		WriteU32ToUCharVectorLE(OutData, 2, ChunkDataIndex + 0);
-		WriteU32ToUCharVectorLE(OutData, 2, ChunkDataIndex + 12);
-		WriteU32ToUCharVectorLE(OutData, 1, ChunkDataIndex + 28);
-		WriteU32ToUCharVectorLE(OutData, 1, ChunkDataIndex + 60);
-	}
 }
 
 void GenerateShaderBytecode(D3DOpcodeState* Opcodes, std::vector<byte>* OutBytecode)
