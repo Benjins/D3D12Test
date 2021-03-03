@@ -261,7 +261,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		return 0;
 	}
 
-	if (0)
+	//if (0)
 	{
 		//const char* ExampleShaderFilename = "example_shaders/9795564935892538031_pixel.dxbc";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_add_bytecode.bin";
@@ -269,12 +269,12 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_cbv1_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex1_bytecode.bin";
-		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_bytecode.bin";
+		const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_2_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_bytecode.bin";
 		//const char* ExampleShaderFilename = "manual_bytecode/raw_reinsert_01.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_cbv_bytecode.bin";
-		const char* ExampleShaderFilename = "dxbc_re/ps_plain_add_coords_bytecode.bin";
+		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_add_coords_bytecode.bin";
 
 		{
 			FuzzDXBCState DXBCFuzzer;
