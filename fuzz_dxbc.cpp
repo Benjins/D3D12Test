@@ -1051,6 +1051,13 @@ struct BytecodeOperand {
 		Operand.Mask = Mask;
 		return Operand;
 	}
+
+	static BytecodeOperand OpFloat1(float Val) {
+		BytecodeOperand Operand;
+		Operand.Type = BytecodeOperandType::ImmediateFloat1;
+		Operand.Float1 = Val;
+		return Operand;
+	}
 };
 
 void ShaderDeclareGlobalFlags(D3DOpcodeState* Bytecode, bool isRefactoringAllowed)
@@ -1147,6 +1154,15 @@ void ShaderWriteOperand(D3DOpcodeState* Bytecode, const BytecodeOperand& Op)
 		{
 			Bytecode->Opcodes.push_back(*(uint32*)&Op.Float4.Values[i]);
 		}
+	}
+	else if (Op.Type == BytecodeOperandType::ImmediateFloat1)
+	{
+		SetBitsFromWord<0, 1>(&HeaderDWORD, OperandNumComponents_One);
+
+		SetBitsFromWord<12, 19>(&HeaderDWORD, OperandSourceType_Immediate32);
+		Bytecode->Opcodes.push_back(HeaderDWORD);
+
+		Bytecode->Opcodes.push_back(*(uint32*)&Op.Float1);
 	}
 	else
 	{
@@ -1323,9 +1339,57 @@ void ShaderMul(D3DOpcodeState* Bytecode, BytecodeOperand Src1, BytecodeOperand S
 	ShaderPerformBinaryOp(Bytecode, D3DOpcodeType_MUL, Src1, Src2, Dst);
 }
 
-void ShaderSampleTextureLevel0(D3DOpcodeState* Bytecode, BytecodeRegisterRef Tex, BytecodeRegisterRef Sampler, BytecodeOperand UVs, BytecodeRegisterRef Dst, float MipsLevel)
+void ShaderSampleTextureLevel(D3DOpcodeState* Bytecode, BytecodeOperand Tex, BytecodeOperand Sampler, BytecodeOperand UVs, BytecodeOperand Dst, BytecodeOperand MipsLevel)
 {
+	ASSERT(Dst.Type == BytecodeOperandType::Register);
+	ASSERT(Tex.Type == BytecodeOperandType::Register);
+	ASSERT(Tex.Register.RegType == BytecodeRegisterType::Texture);
+	ASSERT(Sampler.Type == BytecodeOperandType::Register);
+	ASSERT(Sampler.Register.RegType == BytecodeRegisterType::Sampler);
+	ASSERT(MipsLevel.Type == BytecodeOperandType::ImmediateFloat1);
+
+	uint32 OpcodeDWORD = 0;
+	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_SAMPLE_L);
+	SetBitsFromWord<31, 31>(&OpcodeDWORD, 1);
 	
+	int32 OpcodeFirstWordIndex = Bytecode->Opcodes.size();
+	
+	//SetBitsFromWord<24, 30>(&OpcodeDWORD, 5);
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
+
+	{
+		uint32 OpcodeHeaderExtension = 0;
+		SetBitsFromWord<0, 5>(&OpcodeHeaderExtension, OpcodeExtensionType_ResourceDim);
+		SetBitsFromWord<6, 10>(&OpcodeHeaderExtension, ResourceDimension_Texture2D);
+		uint32 ResourceStride = 0;
+		SetBitsFromWord<11, 15>(&OpcodeHeaderExtension, ResourceStride);
+		SetBitsFromWord<31, 31>(&OpcodeHeaderExtension, 1);
+
+		Bytecode->Opcodes.push_back(OpcodeHeaderExtension);
+	}
+
+	{
+		uint32 OpcodeHeaderExtension = 0;
+		SetBitsFromWord<0, 5>(&OpcodeHeaderExtension, OpcodeExtensionType_ResourceReturnType);
+
+		for (int32 i = 0; i < 4; i++)
+		{
+			SetBitsFromWord(&OpcodeHeaderExtension, 6 + 4 * i, 9 + 4 * i, ResourceReturnType_Float);
+		}
+
+		SetBitsFromWord<31, 31>(&OpcodeHeaderExtension, 0);
+
+		Bytecode->Opcodes.push_back(OpcodeHeaderExtension);
+	}
+
+	ShaderWriteOperand(Bytecode, Dst);
+	ShaderWriteOperand(Bytecode, UVs);
+	ShaderWriteOperand(Bytecode, Tex);
+	ShaderWriteOperand(Bytecode, Sampler);
+	ShaderWriteOperand(Bytecode, MipsLevel);
+
+
+	SetBitsFromWord<24, 30>(&Bytecode->Opcodes[OpcodeFirstWordIndex], Bytecode->Opcodes.size() - OpcodeFirstWordIndex);
 }
 
 void ShaderReturn(D3DOpcodeState* Bytecode)
@@ -1410,12 +1474,19 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 
 	if (Bytecode->ShaderType == D3DShaderType::Pixel)
 	{
-		ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.001f, 0.001f, 0.2f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)));
+		ShaderSampleTextureLevel(Bytecode,
+			BytecodeOperand::OpRegister(BytecodeRegisterRef::Texture(0)),
+			BytecodeOperand::OpRegister(BytecodeRegisterRef::Sampler(0)),
+			BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)),
+			BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)),
+			BytecodeOperand::OpFloat1(0.3f));
+		//ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.001f, 0.002f, 0.8f, 0.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)));
 		ShaderAdd(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.01f, 0.12f, 0.2f, 0.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
 	}
 	else
 	{
 		ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+		ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(1)));
 	}
 
 	ShaderReturn(Bytecode);
@@ -1927,11 +1998,11 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	GenerateShaderBytecode(&VertShader, &VSBytecode);
 	GenerateShaderBytecode(&PixelShader, &PSBytecode);
 
-	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
-	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
+	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
+	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
 
-	ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
-	ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
+	//ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
+	//ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
 
 	HRESULT hr;
 	{
