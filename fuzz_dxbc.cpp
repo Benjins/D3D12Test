@@ -1242,6 +1242,16 @@ void ShaderDeclareSampler(D3DOpcodeState* Bytecode, int32 RegisterIndex /*TODO: 
 
 }
 
+void ShaderDeclareNumTempRegisters(D3DOpcodeState* Bytecode, int32 NumTempRegs)
+{
+	uint32 OpcodeDWORD = 0;
+	SetBitsFromWord<0, 10>(&OpcodeDWORD, D3DOpcodeType_DCL_TEMPS);
+	SetBitsFromWord<24, 30>(&OpcodeDWORD, 2); // Set length to 2 DWORDs (including this one)
+	Bytecode->Opcodes.push_back(OpcodeDWORD);
+
+	Bytecode->Opcodes.push_back(NumTempRegs);
+}
+
 void ShaderDoMov(D3DOpcodeState* Bytecode, BytecodeOperand Src, BytecodeOperand Dst)
 {
 	uint32 OpcodeDWORD = 0;
@@ -1273,7 +1283,7 @@ void ShaderPerformBinaryOp(D3DOpcodeState* Bytecode, D3DOpcodeType OpcodeType, B
 	SetBitsFromWord<24, 30>(&Bytecode->Opcodes[OpcodeFirstWordIndex], Bytecode->Opcodes.size() - OpcodeFirstWordIndex);
 }
 
-void ShaderAddReg(D3DOpcodeState* Bytecode, BytecodeOperand Src1, BytecodeOperand Src2, BytecodeOperand Dst)
+void ShaderAdd(D3DOpcodeState* Bytecode, BytecodeOperand Src1, BytecodeOperand Src2, BytecodeOperand Dst)
 {
 	ShaderPerformBinaryOp(Bytecode, D3DOpcodeType_ADD, Src1, Src2, Dst);
 }
@@ -1318,20 +1328,55 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 
 	if (Bytecode->ShaderType == D3DShaderType::Vertex)
 	{
-		ShaderDeclareInput(Bytecode, 0);
-		ShaderDeclareOutput_SIV(Bytecode, 0, OperandSemantic_Position);
-		//ShaderDeclareOutput(Bytecode, 1);
+		for (int32 i = 0; i < Bytecode->InputSemantics.size(); i++)
+		{
+			ShaderDeclareInput(Bytecode, i);
+		}
+
+		for (int32 i = 0; i < Bytecode->OutputSemantics.size(); i++)
+		{
+			auto Semantic = Bytecode->OutputSemantics[i];
+			if (Semantic == ShaderSemantic::SV_POSITION)
+			{
+				ShaderDeclareOutput_SIV(Bytecode, i, OperandSemantic_Position);
+			}
+			else
+			{
+				ShaderDeclareOutput(Bytecode, i);
+			}
+		}
 	}
 	else if (Bytecode->ShaderType == D3DShaderType::Pixel)
 	{
-		ShaderDeclareInputPS_SIV(Bytecode, 0, OperandSemantic_Position, PSInputInterpolationMode_LinearNoPerspective);
-		//ShaderDeclareInputPS(Bytecode, 1, PSInputInterpolationMode_Linear);
-		ShaderDeclareOutput(Bytecode, 0);
+		for (int32 i = 0; i < Bytecode->InputSemantics.size(); i++)
+		{
+			auto Semantic = Bytecode->OutputSemantics[i];
+			
+			if (Semantic == ShaderSemantic::SV_POSITION)
+			{
+				ShaderDeclareInputPS_SIV(Bytecode, i, OperandSemantic_Position, PSInputInterpolationMode_LinearNoPerspective);
+			}
+			else
+			{
+				ShaderDeclareInputPS(Bytecode, i, PSInputInterpolationMode_Linear);
+			}
+		}
+
+		for (int32 i = 0; i < Bytecode->OutputSemantics.size(); i++)
+		{
+			ShaderDeclareOutput(Bytecode, i);
+		}
+	}
+
+	if (Bytecode->NumTempRegisters > 0)
+	{
+		ShaderDeclareNumTempRegisters(Bytecode, Bytecode->NumTempRegisters);
 	}
 
 	if (Bytecode->ShaderType == D3DShaderType::Pixel)
 	{
-		ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.002f, 0.002f, 1.0f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+		ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.001f, 0.001f, 0.2f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)));
+		ShaderAdd(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.01f, 0.12f, 0.2f, 0.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
 	}
 	else
 	{
@@ -1828,6 +1873,9 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	PixelShader.ShaderType = D3DShaderType::Pixel;
 
 	RandomiseShaderBytecodeParams(DXBCState, &VertShader, &PixelShader);
+
+	VertShader.NumTempRegisters = 0;
+	PixelShader.NumTempRegisters = 1;
 
 	GenerateBytecodeOpcodes(DXBCState, &VertShader);
 	GenerateBytecodeOpcodes(DXBCState, &PixelShader);
