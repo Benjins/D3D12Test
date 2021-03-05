@@ -12,14 +12,12 @@ void ParseDXBCCode(byte* Code, int32 Length);
 
 struct D3DOpcodeState
 {
-	uint32 NumTempRegisters = 0;
-	uint32 TempRegisterClobberMask = 0;
-	uint32 NextWrittenTempRegister = 0;
-
-	D3DShaderType ShaderType = D3DShaderType::Vertex;
 
 	//
 	// These are set before generating the bytecode, they set the parameters of what we do
+	uint32 NumTempRegisters = 0;
+	int32 DataOpcodesToEmit = 0;
+	D3DShaderType ShaderType = D3DShaderType::Vertex;
 	int32 NumTextures = 0;
 	int32 NumSamplers = 0;
 	std::vector<int32> CBVSizes;
@@ -31,10 +29,12 @@ struct D3DOpcodeState
 };
 
 
-struct FuzzDXBCState
+struct FuzzDXBCState : FuzzBasicState
 {
 	ID3DBlob* VSBlob = nullptr;
 	ID3DBlob* PSBlob = nullptr;
+
+	// TODO: Config options
 };
 
 void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode);

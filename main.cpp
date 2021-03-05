@@ -50,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 1;
+	int ChosenAdapterIndex = 0;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -363,7 +363,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			LARGE_INTEGER PerfStart;
 			QueryPerformanceCounter(&PerfStart);
 			
-			const int32 TestCases = 1;// 100;
+			const int32 TestCases = 100;
 
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;
@@ -378,7 +378,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 				Fuzzer.Config = &ShaderConfig;
 
 				LOG("Doing round %d of fuzzing...", i);
-				SetSeedOnFuzzer(&Fuzzer, i);
+				Fuzzer.SetSeed(i);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
 			}
 			
@@ -425,7 +425,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 						// In theory can cause contention maybe or slow things down? Idk, can remove this
 						LOG("Fuzing with seed %llu", InitialFuzzSeed);
 					
-						SetSeedOnFuzzer(&Fuzzer, InitialFuzzSeed);
+						Fuzzer.SetSeed(InitialFuzzSeed);
 						DoIterationsWithFuzzer(&Fuzzer, 1);
 		
 						// Helpful if we want some output to know that it's going but don't want spam

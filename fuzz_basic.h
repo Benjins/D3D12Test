@@ -30,6 +30,17 @@ struct FuzzBasicState {
 	{
 		return GetFloatInRange(0.0f, 1.0f);
 	}
+
+	void SetSeed(uint64_t Seed)
+	{
+		RNGState.seed(Seed);
+		InitialFuzzSeed = Seed;
+	}
+
+	uint64 GetSubSeed()
+	{
+		return RNGState();
+	}
 };
 
 

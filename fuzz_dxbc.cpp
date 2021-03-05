@@ -1411,10 +1411,22 @@ void ShaderReturn(D3DOpcodeState* Bytecode)
 }
 
 
+constexpr static uint32 Log2(uint32 Val) {
+	uint32 Log = 0;
+	while (Val > 1)
+	{
+		Val = Val >> 1;
+		Log++;
+	}
+	return Log;
+}
+
+static_assert(Log2(1) == 0, "Log2 test");
+static_assert(Log2(2) == 1, "Log2 test");
+static_assert(Log2(4) == 2, "Log2 test");
+
 void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 {
-	Bytecode->NextWrittenTempRegister = 0;
-	Bytecode->TempRegisterClobberMask = 0;
 	Bytecode->Opcodes.clear();
 
 	// Blind reserve
@@ -1460,7 +1472,7 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 		for (int32 i = 0; i < Bytecode->InputSemantics.size(); i++)
 		{
 			auto Semantic = Bytecode->InputSemantics[i];
-			
+
 			if (Semantic == ShaderSemantic::SV_POSITION)
 			{
 				ShaderDeclareInputPS_SIV(Bytecode, i, OperandSemantic_Position, PSInputInterpolationMode_LinearNoPerspective);
@@ -1477,30 +1489,128 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 		}
 	}
 
+	// I guess we could do something besides this, but like what
+	ASSERT(Bytecode->NumTempRegisters > 0);
+
 	if (Bytecode->NumTempRegisters > 0)
 	{
 		ShaderDeclareNumTempRegisters(Bytecode, Bytecode->NumTempRegisters);
 	}
 
-	if (Bytecode->ShaderType == D3DShaderType::Pixel)
-	{
-		//ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.003f, 0.02f, 0.0f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+	// TODO: Randomise op codes based on possible inputs and outputs, basically cycle through temp registers writing to them until the end where we output it
+	uint32 RegisterValidMask = 0;
+	int32 NextTempRegisterToWrite = 0;
 
-		ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.003f, 0.02f, 0.0f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)));
-		ShaderSampleTextureLevel(Bytecode,
-			BytecodeOperand::OpRegister(BytecodeRegisterRef::Texture(0)),
-			BytecodeOperand::OpRegister(BytecodeRegisterRef::Sampler(0)),
-			BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0), BytecodeOperandSwizzling(BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::Y, BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::X), 0x0F),
-			BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)),
-			BytecodeOperand::OpFloat1(0.3f));
-		ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.001f, 0.002f, 0.8f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(1)));
-		ShaderAdd(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(1)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
-	}
-	else
+	auto GetRandomValue = [&]()
 	{
-		ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
-		ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(1)));
+		return DXBCState->GetFloat01();
+	};
+
+	auto PickDataOperand = [&](bool AllowLiterals) {
+		int32 Decider = DXBCState->GetIntInRange(0, 99);
+
+		if (RegisterValidMask > 0 && Decider < 50)
+		{
+			int32 NumValidRegs = Log2(RegisterValidMask + 1);
+			int32 TempRegIndex = DXBCState->GetIntInRange(0, NumValidRegs - 1);
+
+			auto Swizzle = BytecodeOperandSwizzling();
+			if (DXBCState->GetFloat01() < 0.2f)
+			{
+				for (int32 i = 0; i < 4; i++)
+				{
+					Swizzle.Swizzling[i] = DXBCState->GetIntInRange(0, 3);
+				}
+			}
+
+			return BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(TempRegIndex), Swizzle);
+		}
+		// TODO: Load from CBVs
+		//else if (Bytecode->CBVSizes.size() > 0 && Decider < 20)
+		//{
+		//
+		//}
+		else if (AllowLiterals && Decider < 90)
+		{
+			return BytecodeOperand::OpFloat4(BytecodeImmediateValue(GetRandomValue() + 0.5f, GetRandomValue() + 0.5f, GetRandomValue() + 0.5f, GetRandomValue() + 0.5f));
+		}
+		else if (Decider < 100)
+		{
+			int32 InputIndex = DXBCState->GetIntInRange(0, Bytecode->InputSemantics.size() - 1);
+			return BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(InputIndex));
+		}
+		else
+		{
+			ASSERT(false);
+		}
+
+		return BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0));
+	};
+
+	for (int32 i = 0; i < Bytecode->DataOpcodesToEmit; i++)
+	{
+		// TODO: No no no
+		int32 Decider = DXBCState->GetIntInRange(0, 99);
+
+		auto Dst = BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(NextTempRegisterToWrite));
+
+		if (Bytecode->NumTextures > 0 && Bytecode->NumSamplers > 0 && Decider < 30)
+		{
+			auto Tex = BytecodeOperand::OpRegister(BytecodeRegisterRef::Texture(DXBCState->GetIntInRange(0, Bytecode->NumTextures - 1)));
+			auto Sampler = BytecodeOperand::OpRegister(BytecodeRegisterRef::Sampler(DXBCState->GetIntInRange(0, Bytecode->NumSamplers - 1)));
+			auto UVs = PickDataOperand(false);
+			// We always need this sort of swizzle for UVs to sampling...I guess
+			UVs.Swizzling = BytecodeOperandSwizzling(BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::Y, BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::X);
+			
+			auto MipsLevel = BytecodeOperand::OpFloat1(GetRandomValue() * 4.0f);
+			ShaderSampleTextureLevel(Bytecode, Tex, Sampler, UVs, Dst, MipsLevel);
+		}
+		else if (Decider < 60)
+		{
+			// Mul
+			ShaderMul(Bytecode, PickDataOperand(false), PickDataOperand(true), Dst);
+		}
+		else if (Decider < 100)
+		{
+			// Add
+			ShaderAdd(Bytecode, PickDataOperand(false), PickDataOperand(true), Dst);
+		}
+		else
+		{
+			ASSERT(false);
+		}
+
+		NextTempRegisterToWrite = (NextTempRegisterToWrite + 1) % Bytecode->NumTempRegisters;
+		RegisterValidMask |= (1 << NextTempRegisterToWrite);
 	}
+
+	// Do a MOV from last written temp register to output, and from random temp registers for the others
+	int32 LastWrittenTempRegister = (NextTempRegisterToWrite + Bytecode->NumTempRegisters - 1) % Bytecode->NumTempRegisters;
+	ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(LastWrittenTempRegister)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+	for (int32 i = 1; i < Bytecode->OutputSemantics.size(); i++)
+	{
+		ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(DXBCState->GetIntInRange(0, Bytecode->NumTempRegisters - 1))), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(i)));
+	}
+
+	//if (Bytecode->ShaderType == D3DShaderType::Pixel)
+	//{
+	//	//ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.003f, 0.02f, 0.0f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+	//
+	//	ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.003f, 0.02f, 0.0f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)));
+	//	ShaderSampleTextureLevel(Bytecode,
+	//		BytecodeOperand::OpRegister(BytecodeRegisterRef::Texture(0)),
+	//		BytecodeOperand::OpRegister(BytecodeRegisterRef::Sampler(0)),
+	//		BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0), BytecodeOperandSwizzling(BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::Y, BytecodeOperandSwizzle::X, BytecodeOperandSwizzle::X), 0x0F),
+	//		BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)),
+	//		BytecodeOperand::OpFloat1(0.3f));
+	//	ShaderMul(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpFloat4(BytecodeImmediateValue(0.001f, 0.002f, 0.8f, 1.0f)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(1)));
+	//	ShaderAdd(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(0)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(1)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+	//}
+	//else
+	//{
+	//	ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(0)));
+	//	ShaderDoMov(Bytecode, BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(1)), BytecodeOperand::OpRegister(BytecodeRegisterRef::Output(1)));
+	//}
 
 	ShaderReturn(Bytecode);
 
@@ -2019,8 +2129,10 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 
 	RandomiseShaderBytecodeParams(DXBCState, &VertShader, &PixelShader);
 
-	VertShader.NumTempRegisters = 0;
-	PixelShader.NumTempRegisters = 2;
+	VertShader.NumTempRegisters = 3;
+	VertShader.DataOpcodesToEmit = 6;
+	PixelShader.NumTempRegisters = 5;
+	PixelShader.DataOpcodesToEmit = 12;
 
 	GenerateBytecodeOpcodes(DXBCState, &VertShader);
 	GenerateBytecodeOpcodes(DXBCState, &PixelShader);

@@ -1464,12 +1464,6 @@ void CreateInterstageVarsForVertexAndPixelShaders(ShaderFuzzingState* Fuzzer, Fu
 	}
 }
 
-void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed)
-{
-	Fuzzer->RNGState.seed(Seed);
-	Fuzzer->InitialFuzzSeed = Seed;
-}
-
 void CopyTextureResource(ID3D12GraphicsCommandList* CommandList, ID3D12Resource* TextureUploadResource, ID3D12Resource* TextureResource, int32 Width, int32 Height, int32 Pitch)
 {
 	D3D12_TEXTURE_COPY_LOCATION CopyLocSrc = {}, CopyLocDst = {};
@@ -1911,6 +1905,7 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		// TODO: DXBC Bytecode Fuzzer path
 
 		FuzzDXBCState DXBCState;
+		DXBCState.SetSeed(Fuzzer->GetSubSeed());
 		GenerateShaderDXBC(&DXBCState);
 
 		VertShader.ByteCodeBlob = DXBCState.VSBlob;

@@ -89,6 +89,5 @@ struct ShaderFuzzingState : FuzzBasicState {
 
 void SetupFuzzPersistState(D3DDrawingFuzzingPersistentState* Persist, ShaderFuzzConfig* Config, ID3D12Device* Device);
 
-void SetSeedOnFuzzer(ShaderFuzzingState* Fuzzer, uint64_t Seed);
 void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations);
 
