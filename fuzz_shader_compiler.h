@@ -28,6 +28,12 @@ struct D3DDrawingFuzzingPersistentState
 	int32 ExecFenceToSignal = 1;
 };
 
+enum struct ShaderFuzzMethod
+{
+	GeneratFullPipelineWithHLSL,
+	GeneratFullPipelineWithDXBC
+};
+
 struct ShaderFuzzConfig
 {
 	// Make the vertex shader output more sensible position data
@@ -76,6 +82,8 @@ struct ShaderFuzzConfig
 	// The chance that a given resource (right now only immutable textures) will be a placed resource instead of a committed one
 	float PlacedResourceChance = 0.3f;
 
+	// Which method we use
+	ShaderFuzzMethod FuzzMethod = ShaderFuzzMethod::GeneratFullPipelineWithHLSL;
 };
 
 struct ShaderFuzzingState : FuzzBasicState {

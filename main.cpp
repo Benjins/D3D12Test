@@ -50,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 0;
+	int ChosenAdapterIndex = 2;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -323,6 +323,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderConfig.ResourceDeletionChance = 0.9f;
 		ShaderConfig.HeapDeletionChance = 0;// 0.4f;
 		ShaderConfig.PlacedResourceChance = 0;// 0.3f;
+
+		ShaderConfig.FuzzMethod = ShaderFuzzMethod::GeneratFullPipelineWithDXBC;
 
 		ShaderConfig.ShouldReadbackImage = true;
 		ShaderConfig.ReadbackImageNamePrepend = "image_case_dxbc_fuzz_";

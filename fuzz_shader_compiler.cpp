@@ -1888,33 +1888,40 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		VertShader.Type = D3DShaderType::Vertex;
 		PixelShader.Type = D3DShaderType::Pixel;
 
-		//--------------------
 		// HLSL AST Fuzzer path
-		//CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
-		//
-		//// Set types
-		//GenerateFuzzingShader(Fuzzer, &VertShader);
-		//GenerateFuzzingShader(Fuzzer, &PixelShader);
-		//
-		//ConvertShaderASTToSourceCode(&VertShader, Fuzzer->Config);
-		//ConvertShaderASTToSourceCode(&PixelShader, Fuzzer->Config);
-		//
-		//VerifyShaderCompilation(&VertShader);
-		//VerifyShaderCompilation(&PixelShader);
-		//--------------------
-		// TODO: DXBC Bytecode Fuzzer path
+		if (Fuzzer->Config->FuzzMethod == ShaderFuzzMethod::GeneratFullPipelineWithHLSL)
+		{
 
-		FuzzDXBCState DXBCState;
-		DXBCState.SetSeed(Fuzzer->GetSubSeed());
-		GenerateShaderDXBC(&DXBCState);
+			CreateInterstageVarsForVertexAndPixelShaders(Fuzzer, &VertShader, &PixelShader);
+			
+			// Set types
+			GenerateFuzzingShader(Fuzzer, &VertShader);
+			GenerateFuzzingShader(Fuzzer, &PixelShader);
+			
+			ConvertShaderASTToSourceCode(&VertShader, Fuzzer->Config);
+			ConvertShaderASTToSourceCode(&PixelShader, Fuzzer->Config);
+			
+			VerifyShaderCompilation(&VertShader);
+			VerifyShaderCompilation(&PixelShader);
+		}
+		// DXBC Bytecode Fuzzer path
+		else if (Fuzzer->Config->FuzzMethod == ShaderFuzzMethod::GeneratFullPipelineWithDXBC)
+		{
 
-		VertShader.ByteCodeBlob = DXBCState.VSBlob;
-		PixelShader.ByteCodeBlob = DXBCState.PSBlob;
+			FuzzDXBCState DXBCState;
+			DXBCState.SetSeed(Fuzzer->GetSubSeed());
+			GenerateShaderDXBC(&DXBCState);
 
-		ReflectShaderIntoShaderMetadata(VertShader.ByteCodeBlob, &VertShader.ShaderMeta);
-		ReflectShaderIntoShaderMetadata(PixelShader.ByteCodeBlob, &PixelShader.ShaderMeta);
+			VertShader.ByteCodeBlob = DXBCState.VSBlob;
+			PixelShader.ByteCodeBlob = DXBCState.PSBlob;
 
-		//--------------------
+			ReflectShaderIntoShaderMetadata(VertShader.ByteCodeBlob, &VertShader.ShaderMeta);
+			ReflectShaderIntoShaderMetadata(PixelShader.ByteCodeBlob, &PixelShader.ShaderMeta);
+		}
+		else
+		{
+			ASSERT(false && "currently unsupported");
+		}
 
 		ID3D12RootSignature* RootSig = nullptr;
 		ID3D12PipelineState* PSO = nullptr;

@@ -2143,26 +2143,28 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	GenerateShaderBytecode(&VertShader, &VSBytecode);
 	GenerateShaderBytecode(&PixelShader, &PSBytecode);
 
-	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
-	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
-
-	//ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
-	ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
-
 	HRESULT hr;
-	{
-		ID3DBlob* VSDisasmBlob = nullptr;
-		hr = D3DDisassemble(VSBytecode.data(), VSBytecode.size(), 0, nullptr, &VSDisasmBlob);
-		ASSERT(SUCCEEDED(hr));
-	
-		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01_disasm.txt").buffer, VSDisasmBlob->GetBufferPointer(), VSDisasmBlob->GetBufferSize());
-	
-		ID3DBlob* PSDisasmBlob = nullptr;
-		hr = D3DDisassemble(PSBytecode.data(), PSBytecode.size(), 0, nullptr, &PSDisasmBlob);
-		ASSERT(SUCCEEDED(hr));
-	
-		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01_disasm.txt").buffer, PSDisasmBlob->GetBufferPointer(), PSDisasmBlob->GetBufferSize());
-	}
+
+	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
+	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
+	//
+	////ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
+	//ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
+	//
+	//
+	//{
+	//	ID3DBlob* VSDisasmBlob = nullptr;
+	//	hr = D3DDisassemble(VSBytecode.data(), VSBytecode.size(), 0, nullptr, &VSDisasmBlob);
+	//	ASSERT(SUCCEEDED(hr));
+	//
+	//	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01_disasm.txt").buffer, VSDisasmBlob->GetBufferPointer(), VSDisasmBlob->GetBufferSize());
+	//
+	//	ID3DBlob* PSDisasmBlob = nullptr;
+	//	hr = D3DDisassemble(PSBytecode.data(), PSBytecode.size(), 0, nullptr, &PSDisasmBlob);
+	//	ASSERT(SUCCEEDED(hr));
+	//
+	//	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01_disasm.txt").buffer, PSDisasmBlob->GetBufferPointer(), PSDisasmBlob->GetBufferSize());
+	//}
 
 	hr = D3DCreateBlob(VSBytecode.size(), &DXBCState->VSBlob);
 	ASSERT(SUCCEEDED(hr));
