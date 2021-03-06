@@ -50,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 2;
+	int ChosenAdapterIndex = 1;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -317,16 +317,16 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
-		ShaderConfig.ForcePixelOutputAlphaToOne = 1;
-		ShaderConfig.DisableBlendingState = 1;
+		ShaderConfig.ForcePixelOutputAlphaToOne = 0;
+		ShaderConfig.DisableBlendingState = 0;
 		ShaderConfig.CBVUploadRandomFloatData = 1;
-		ShaderConfig.ResourceDeletionChance = 0.9f;
+		ShaderConfig.ResourceDeletionChance = 0.7f;
 		ShaderConfig.HeapDeletionChance = 0;// 0.4f;
 		ShaderConfig.PlacedResourceChance = 0;// 0.3f;
 
 		ShaderConfig.FuzzMethod = ShaderFuzzMethod::GeneratFullPipelineWithDXBC;
 
-		ShaderConfig.ShouldReadbackImage = true;
+		ShaderConfig.ShouldReadbackImage = false;
 		ShaderConfig.ReadbackImageNamePrepend = "image_case_dxbc_fuzz_";
 
 		{
@@ -353,7 +353,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		{
 			DXGI_ADAPTER_DESC Desc = {};
 			ChosenAdapter->GetDesc(&Desc);
-			ShaderConfig.AllowConservativeRasterization = false;// (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
+			ShaderConfig.AllowConservativeRasterization = (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
 			ShaderConfig.LockMutexAroundExecCmdList = (Desc.VendorId == 0x1414 && Desc.DeviceId == 0x8C && !bIsSingleThreaded);
 		}
 
@@ -365,7 +365,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			LARGE_INTEGER PerfStart;
 			QueryPerformanceCounter(&PerfStart);
 			
-			const int32 TestCases = 100;
+			const int32 TestCases = 10*1000;
 
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;
@@ -393,7 +393,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		}
 		else
 		{
-			const int32 ThreadCount = 6;
+			const int32 ThreadCount = 16;
 			std::vector<std::thread> FuzzThreads;
 
 			std::mutex DebugMutex;
@@ -409,7 +409,9 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 					PersistState.ExecuteCommandListMutex = MutexPtr;
 					SetupFuzzPersistState(&PersistState, ConfigPtr, Device);
 
-					for (int32 i = 0; i < 128 * 1000; i++)
+					const int32 IterationsPerThread = 1024 * 1024;
+
+					for (int32 i = 0; i < IterationsPerThread; i++)
 					{
 						ShaderFuzzingState Fuzzer;
 						Fuzzer.D3DDevice = Device;
@@ -419,9 +421,9 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 						uint64 InitialFuzzSeed = 0;
 		
 						// If we want to have different fuzzing each process run. Good once a fuzzer is established.
-						InitialFuzzSeed += StartingTime * 0x8D3F77LLU;
+						InitialFuzzSeed += StartingTime * 0x8D3F277LLU;
 		
-						InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
+						InitialFuzzSeed += (TIdx * IterationsPerThread);
 						InitialFuzzSeed += i;
 		
 						// In theory can cause contention maybe or slow things down? Idk, can remove this
