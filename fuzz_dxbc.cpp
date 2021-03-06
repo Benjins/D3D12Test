@@ -816,6 +816,14 @@ void ParseDXBCCode(byte* Code, int32 Length)
 					uint16 VarMemberCount = GetValueFromCursor<uint16>(&VarTypeCursor);
 					uint16 VarMemberOffset = GetValueFromCursor<uint16>(&VarTypeCursor);
 
+					uint16 UnknownStuff1 = GetValueFromCursor<uint16>(&VarTypeCursor);
+					uint32 UnknownStuff2 = GetValueFromCursor<uint32>(&VarTypeCursor);
+					uint32 UnknownStuff3 = GetValueFromCursor<uint32>(&VarTypeCursor);
+					uint32 UnknownStuff4 = GetValueFromCursor<uint32>(&VarTypeCursor);
+					uint32 UnknownStuff5 = GetValueFromCursor<uint32>(&VarTypeCursor);
+					uint32 VarTypeNameOffset = GetValueFromCursor<uint32>(&VarTypeCursor);
+					byte* VarTypeNameCursor = ChunkDataAfterHeader + VarTypeNameOffset;
+
 					int xc = 0;
 					xc++;
 					(void)xc;
@@ -1686,19 +1694,19 @@ void RandomiseShaderBytecodeParams(FuzzDXBCState* DXBCState, D3DOpcodeState* VSO
 	VSOpcodes->NumTextures = DXBCState->GetIntInRange(0, 3);
 	VSOpcodes->NumSamplers = DXBCState->GetIntInRange(0, 3);
 	VSOpcodes->CBVSizes.push_back(1);
-	//VSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 3));
-	//for (int32 i = 0; i < VSOpcodes->CBVSizes.size(); i++)
-	//{
-	//	VSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 5);
-	//}
+	VSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 3));
+	for (int32 i = 0; i < VSOpcodes->CBVSizes.size(); i++)
+	{
+		VSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 5);
+	}
 
 	PSOpcodes->NumTextures = DXBCState->GetIntInRange(0, 3);
 	PSOpcodes->NumSamplers = DXBCState->GetIntInRange(0, 3);
-	//PSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 3));
-	//for (int32 i = 0; i < PSOpcodes->CBVSizes.size(); i++)
-	//{
-	//	PSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 5);
-	//}
+	PSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 3));
+	for (int32 i = 0; i < PSOpcodes->CBVSizes.size(); i++)
+	{
+		PSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 5);
+	}
 }
 
 // Little-endian, as god intended
@@ -1713,7 +1721,7 @@ void WriteU32ToUCharVectorLE(std::vector<byte>* OutData, uint32 Val, int32 Index
 	}
 	else
 	{
-		ASSERT(Index >= 0 && Index < OutData->size() - 4);
+		ASSERT(Index >= 0 && Index <= OutData->size() - 4);
 		for (int32 i = 0; i < 4; i++)
 		{
 			(*OutData)[Index + i] = ((byte)((Val >> (i * 8)) & 0xFF));
@@ -1939,6 +1947,12 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 
 			// Offset to default value, we can just put this as 0 and it won't try to read it
 			WriteU32ToUCharVectorLE(OutData, 0);
+			
+			// Unknown, something to do with textures/samplers maybe
+			WriteU32ToUCharVectorLE(OutData, -1);
+			WriteU32ToUCharVectorLE(OutData, 0);
+			WriteU32ToUCharVectorLE(OutData, -1);
+			WriteU32ToUCharVectorLE(OutData, 0);
 		}
 	}
 
@@ -1957,6 +1971,7 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 		}
 	}
 
+	std::vector<int32> CBVVarTypeNameOffsetIndices;
 	for (int32 CBVVarIndex = 0; CBVVarIndex < CBVVarTypeOffsetIndices.size(); CBVVarIndex++)
 	{
 		int32 CBVVarTypeOffsetIndex = CBVVarTypeOffsetIndices[CBVVarIndex];
@@ -1981,7 +1996,36 @@ void GenerateRDEFChunk(D3DOpcodeState* Opcodes, std::vector<byte>* OutData)
 
 		// Offset from chunk data start to first member (irrelevant for vectors)
 		WriteU16ToUCharVectorLE(OutData, 0);
+		
+		// Unkown, maybe some flags
+		WriteU16ToUCharVectorLE(OutData, 0);
+		
+		// Maybe some texture/sampler data? Idk, seems to only be in SM5.0 or higher
+		WriteU32ToUCharVectorLE(OutData, 0);
+		WriteU32ToUCharVectorLE(OutData, 0);
+		WriteU32ToUCharVectorLE(OutData, 0);
+		WriteU32ToUCharVectorLE(OutData, 0);
+
+		CBVVarTypeNameOffsetIndices.push_back(OutData->size());
+		// Placeholder for CBV type name offset, we will fix up later
+		WriteU32ToUCharVectorLE(OutData, 0);
 	}
+
+	{
+		for (int32 CBVVarIndex = 0; CBVVarIndex < CBVVarTypeNameOffsetIndices.size(); CBVVarIndex++)
+		{
+			int32 CBVVarTypeNameOffsetIndex = CBVVarTypeNameOffsetIndices[CBVVarIndex];
+			WriteU32ToUCharVectorLE(OutData, OutData->size() - ChunkDataStartIndex, CBVVarTypeNameOffsetIndex);
+		}
+
+		WriteStringtoUCharVector(OutData, "float4");
+		// Uhhh...padding?
+		while (OutData->size() % 4 != 0)
+		{
+			OutData->push_back(0xAB);
+		}
+	}
+
 
 	for (int32 ResIndex = 0; ResIndex < ResourceBindingNameOffsetIndices.size(); ResIndex++)
 	{
@@ -2210,23 +2254,23 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 
 	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01.bin").buffer, VSBytecode.data(), VSBytecode.size());
 	//WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01.bin").buffer, PSBytecode.data(), PSBytecode.size());
-	
-	ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
-	ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
-
-	{
-		ID3DBlob* VSDisasmBlob = nullptr;
-		hr = D3DDisassemble(VSBytecode.data(), VSBytecode.size(), 0, nullptr, &VSDisasmBlob);
-		ASSERT(SUCCEEDED(hr));
-	
-		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01_disasm.txt").buffer, VSDisasmBlob->GetBufferPointer(), VSDisasmBlob->GetBufferSize());
-	
-		ID3DBlob* PSDisasmBlob = nullptr;
-		hr = D3DDisassemble(PSBytecode.data(), PSBytecode.size(), 0, nullptr, &PSDisasmBlob);
-		ASSERT(SUCCEEDED(hr));
-	
-		WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01_disasm.txt").buffer, PSDisasmBlob->GetBufferPointer(), PSDisasmBlob->GetBufferSize());
-	}
+	//
+	//ParseDXBCCode(VSBytecode.data(), VSBytecode.size());
+	//ParseDXBCCode(PSBytecode.data(), PSBytecode.size());
+	//
+	//{
+	//	ID3DBlob* VSDisasmBlob = nullptr;
+	//	hr = D3DDisassemble(VSBytecode.data(), VSBytecode.size(), 0, nullptr, &VSDisasmBlob);
+	//	ASSERT(SUCCEEDED(hr));
+	//
+	//	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_vs_01_disasm.txt").buffer, VSDisasmBlob->GetBufferPointer(), VSDisasmBlob->GetBufferSize());
+	//
+	//	ID3DBlob* PSDisasmBlob = nullptr;
+	//	hr = D3DDisassemble(PSBytecode.data(), PSBytecode.size(), 0, nullptr, &PSDisasmBlob);
+	//	ASSERT(SUCCEEDED(hr));
+	//
+	//	WriteDataToFile(StringStackBuffer<256>("manual_bytecode/gen_ps_01_disasm.txt").buffer, PSDisasmBlob->GetBufferPointer(), PSDisasmBlob->GetBufferSize());
+	//}
 
 	hr = D3DCreateBlob(VSBytecode.size(), &DXBCState->VSBlob);
 	ASSERT(SUCCEEDED(hr));

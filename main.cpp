@@ -50,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 1;
+	int ChosenAdapterIndex = 0;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -275,7 +275,9 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		//const char* ExampleShaderFilename = "manual_bytecode/raw_reinsert_01.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_cbv_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_add_coords_bytecode.bin";
-		const char* ExampleShaderFilename = "dxbc_re/ps_plain_sample_bytecode.bin";
+		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_sample_bytecode.bin";
+		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_cbv1_bytecode.bin";
+		const char* ExampleShaderFilename = "manual_bytecode/gen_vs_01.bin";
 
 		{
 			FuzzDXBCState DXBCFuzzer;
@@ -291,11 +293,11 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		
 		ParseDXBCCode((byte*)FileData, FileSize);
 
-		//ID3DBlob* Disasm = nullptr;
-		//HRESULT hr = D3DDisassemble(FileData, FileSize, 0, nullptr, &Disasm);
-		//ASSERT(SUCCEEDED(hr));
-		//
-		//WriteDataToFile("manual_bytecode/raw_reinsert_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
+		ID3DBlob* Disasm = nullptr;
+		HRESULT hr = D3DDisassemble(FileData, FileSize, 0, nullptr, &Disasm);
+		ASSERT(SUCCEEDED(hr));
+		
+		WriteDataToFile("manual_bytecode/gen_vs_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
 
 
 		return 0;
@@ -326,7 +328,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 		ShaderConfig.FuzzMethod = ShaderFuzzMethod::GeneratFullPipelineWithDXBC;
 
-		ShaderConfig.ShouldReadbackImage = false;
+		ShaderConfig.ShouldReadbackImage = true;
 		ShaderConfig.ReadbackImageNamePrepend = "image_case_dxbc_fuzz_";
 
 		{
