@@ -50,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 2;
+	int ChosenAdapterIndex = 0;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -342,7 +342,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.ForcePixelOutputAlphaToOne = 0;
-		ShaderConfig.DisableBlendingState = 0;
+		ShaderConfig.DisableBlendingState = 1;
 		ShaderConfig.CBVUploadRandomFloatData = 1;
 		ShaderConfig.ResourceDeletionChance = 0.7f;
 		ShaderConfig.HeapDeletionChance = 0;// 0.4f;

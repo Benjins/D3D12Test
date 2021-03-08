@@ -1577,7 +1577,15 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 
 	if (Bytecode->NumTempRegisters > 0)
 	{
-		ShaderDeclareNumTempRegisters(Bytecode, Bytecode->NumTempRegisters);
+		// Pixel shaders will use one extra register for storing the SV_POSITION input arg in  a normalized fashion
+		if (Bytecode->ShaderType == D3DShaderType::Pixel)
+		{
+			ShaderDeclareNumTempRegisters(Bytecode, Bytecode->NumTempRegisters + 1);
+		}
+		else
+		{
+			ShaderDeclareNumTempRegisters(Bytecode, Bytecode->NumTempRegisters);
+		}
 	}
 
 	// TODO: Randomise op codes based on possible inputs and outputs, basically cycle through temp registers writing to them until the end where we output it
@@ -1601,6 +1609,9 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 		}
 		return Swizzle;
 	};
+
+	// [0, Bytecode->NumTempRegisters) will be scratch registers for calculating stuff, 
+	int32 TempRegisterToHoldNormalizedSVCoords = Bytecode->NumTempRegisters;
 
 	auto PickDataOperand = [&](bool AllowLiterals) {
 		int32 Decider = DXBCState->GetIntInRange(0, 99);
@@ -1627,7 +1638,15 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 		else if (Decider < 100)
 		{
 			int32 InputIndex = DXBCState->GetIntInRange(0, Bytecode->InputSemantics.size() - 1);
-			return BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(InputIndex));
+
+			if (Bytecode->ShaderType == D3DShaderType::Pixel && InputIndex == 0)
+			{
+				return BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(TempRegisterToHoldNormalizedSVCoords));
+			}
+			else
+			{
+				return BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(InputIndex));
+			}
 		}
 		else
 		{
@@ -1637,6 +1656,20 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 		return BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0));
 	};
 
+	if (Bytecode->ShaderType == D3DShaderType::Pixel)
+	{
+		ASSERT(Bytecode->InputSemantics[0] == ShaderSemantic::SV_POSITION);
+		auto SV_INPUT = BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(0));
+		auto NormlizedRegister = BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(TempRegisterToHoldNormalizedSVCoords));
+
+		// TODO: Assuming 512x512 render target size
+		float XScale = 1.0f / DXBCState->GetFloatInRange(400, 700);
+		float YScale = 1.0f / DXBCState->GetFloatInRange(400, 700);
+		auto ScaleOp = BytecodeOperand::OpFloat4(BytecodeImmediateValue(XScale, YScale, 1.0f, 1.0f));
+
+		ShaderMul(Bytecode, SV_INPUT, ScaleOp, NormlizedRegister);
+	}
+
 	for (int32 i = 0; i < Bytecode->DataOpcodesToEmit; i++)
 	{
 		// TODO: No no no
@@ -1644,7 +1677,7 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 	
 		auto Dst = BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(NextTempRegisterToWrite));
 	
-		if (false && Bytecode->NumTextures > 0 && Bytecode->NumSamplers > 0 && Decider < 30)
+		if (Bytecode->NumTextures > 0 && Bytecode->NumSamplers > 0 && Decider < 30)
 		{
 			auto Tex = BytecodeOperand::OpRegister(BytecodeRegisterRef::Texture(DXBCState->GetIntInRange(0, Bytecode->NumTextures - 1)));
 			auto Sampler = BytecodeOperand::OpRegister(BytecodeRegisterRef::Sampler(DXBCState->GetIntInRange(0, Bytecode->NumSamplers - 1)));
