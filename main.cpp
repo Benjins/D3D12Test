@@ -50,7 +50,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 0;
+	int ChosenAdapterIndex = 2;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -277,27 +277,49 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_add_coords_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_sample_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_cbv1_bytecode.bin";
-		const char* ExampleShaderFilename = "manual_bytecode/gen_vs_01.bin";
+		//const char* ExampleShaderFilename = "manual_bytecode/gen_vs_01.bin";
+
+
+		const char* ExampleShaderFilename1 = "manual_bytecode/gen_ps_seed_2947667278772165694.bin";
+		const char* ExampleShaderFilename2 = "dxbc_re/ps_plain_tex_sample_bytecode.bin";
+
+		//if(0)
+		{
+			void* FileData = nullptr;
+			int32 FileSize = 0;
+			ReadDataFromFile(ExampleShaderFilename1, &FileData, &FileSize);
+		
+			ParseDXBCCode((byte*)FileData, FileSize);
+		}
+
+		if(0)
+		{
+			void* FileData = nullptr;
+			int32 FileSize = 0;
+			ReadDataFromFile(ExampleShaderFilename2, &FileData, &FileSize);
+		
+			ParseDXBCCode((byte*)FileData, FileSize);
+		}
 
 		{
-			FuzzDXBCState DXBCFuzzer;
-			GenerateShaderDXBC(&DXBCFuzzer);
+			//FuzzDXBCState DXBCFuzzer;
+			//GenerateShaderDXBC(&DXBCFuzzer);
 		
 			//ParseDXBCCode((byte*)FileData, FileSize);
 		}
 
 
-		void* FileData = nullptr;
-		int32 FileSize = 0;
-		ReadDataFromFile(ExampleShaderFilename, &FileData, &FileSize);
-		
-		ParseDXBCCode((byte*)FileData, FileSize);
-
-		ID3DBlob* Disasm = nullptr;
-		HRESULT hr = D3DDisassemble(FileData, FileSize, 0, nullptr, &Disasm);
-		ASSERT(SUCCEEDED(hr));
-		
-		WriteDataToFile("manual_bytecode/gen_vs_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
+		//void* FileData = nullptr;
+		//int32 FileSize = 0;
+		//ReadDataFromFile(ExampleShaderFilename, &FileData, &FileSize);
+		//
+		//ParseDXBCCode((byte*)FileData, FileSize);
+		//
+		//ID3DBlob* Disasm = nullptr;
+		//HRESULT hr = D3DDisassemble(FileData, FileSize, 0, nullptr, &Disasm);
+		//ASSERT(SUCCEEDED(hr));
+		//
+		//WriteDataToFile("manual_bytecode/gen_vs_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
 
 
 		return 0;
@@ -367,7 +389,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			LARGE_INTEGER PerfStart;
 			QueryPerformanceCounter(&PerfStart);
 			
-			const int32 TestCases = 10*1000;
+			const int32 TestCases = 10 * 1000;
 
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;
@@ -381,8 +403,10 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 				Fuzzer.D3DPersist = &PersistState;
 				Fuzzer.Config = &ShaderConfig;
 
-				LOG("Doing round %d of fuzzing...", i);
-				Fuzzer.SetSeed(i);
+				const uint64 InitSeed = i;
+
+				LOG("Doing round %d of fuzzing...", InitSeed);
+				Fuzzer.SetSeed(InitSeed);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
 			}
 			

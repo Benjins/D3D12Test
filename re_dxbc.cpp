@@ -87,6 +87,11 @@ void SpitOutShaderInfo()
 	//}
 
 	//{
+	//	const char* PSPlain = "struct PSOutput { float4 pos : SV_TARGET; };\nTexture2D tex_6;\nSamplerState sampler_6;\nPSOutput Main(float4 pos : SV_POSITION) {\nPSOutput res;\nres.pos = tex_6.SampleLevel(sampler_6, pos.xy, 0);\nreturn res;\n}";
+	//	SpitOutShaderInfoFor("ps_plain_tex_sample", PSPlain, D3DShaderType::Pixel);
+	//}
+
+	//{
 	//	const char* VSPlain = "struct PSInput { float4 pos : SV_POSITION;  float2 uvs : TEXCOORD; };\n"
 	//		"Texture2D tex_1; SamplerState sampler_1;\n"
 	//		"Texture2D tex_2; SamplerState sampler_2;\n"
