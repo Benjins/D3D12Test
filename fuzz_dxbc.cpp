@@ -1614,17 +1614,36 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 	int32 TempRegisterToHoldNormalizedSVCoords = Bytecode->NumTempRegisters;
 
 	auto PickDataOperand = [&](bool AllowLiterals) {
+
+		auto PickInputRegister = [&]()
+		{
+			int32 InputIndex = DXBCState->GetIntInRange(0, Bytecode->InputSemantics.size() - 1);
+
+			if (Bytecode->ShaderType == D3DShaderType::Pixel && InputIndex == 0)
+			{
+				return BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(TempRegisterToHoldNormalizedSVCoords));
+			}
+			else
+			{
+				return BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(InputIndex));
+			}
+		};
+
+
 		int32 Decider = DXBCState->GetIntInRange(0, 99);
 
-		if (RegisterValidMask > 0 && Decider < 50)
+		if (RegisterValidMask > 0 && Decider < 40)
 		{
 			int32 NumValidRegs = Log2(RegisterValidMask + 1);
 			int32 TempRegIndex = DXBCState->GetIntInRange(0, NumValidRegs - 1);
 
 			return BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(TempRegIndex), GetRandomSwizzle());
 		}
-		// TODO: Load from CBVs
-		else if (Bytecode->CBVSizes.size() > 0 && Decider < 60)
+		else if (Decider < 55)
+		{
+			return PickInputRegister();
+		}
+		else if (Bytecode->CBVSizes.size() > 0 && Decider < 65)
 		{
 			int32 CBVRegister = DXBCState->GetIntInRange(0, Bytecode->CBVSizes.size() - 1);
 			int32 CBVOffset = DXBCState->GetIntInRange(0, Bytecode->CBVSizes[CBVRegister] - 1);
@@ -1637,16 +1656,7 @@ void GenerateBytecodeOpcodes(FuzzDXBCState* DXBCState, D3DOpcodeState* Bytecode)
 		}
 		else if (Decider < 100)
 		{
-			int32 InputIndex = DXBCState->GetIntInRange(0, Bytecode->InputSemantics.size() - 1);
-
-			if (Bytecode->ShaderType == D3DShaderType::Pixel && InputIndex == 0)
-			{
-				return BytecodeOperand::OpRegister(BytecodeRegisterRef::Temp(TempRegisterToHoldNormalizedSVCoords));
-			}
-			else
-			{
-				return BytecodeOperand::OpRegister(BytecodeRegisterRef::Input(InputIndex));
-			}
+			return PickInputRegister();
 		}
 		else
 		{
@@ -1816,8 +1826,6 @@ void RandomiseShaderBytecodeParams(FuzzDXBCState* DXBCState, D3DOpcodeState* VSO
 	}
 
 	// TODO: Shuffle input and output semantics (as long as the VS out and PS in order match)
-
-	return;
 
 	VSOpcodes->NumTextures = DXBCState->GetIntInRange(0, 3);
 	VSOpcodes->NumSamplers = DXBCState->GetIntInRange(0, 3);
