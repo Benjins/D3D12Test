@@ -275,51 +275,27 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		//const char* ExampleShaderFilename = "manual_bytecode/raw_reinsert_01.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_tex_sample_cbv_bytecode.bin";
 		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_add_coords_bytecode.bin";
-		//const char* ExampleShaderFilename = "dxbc_re/ps_plain_sample_bytecode.bin";
-		//const char* ExampleShaderFilename = "dxbc_re/vs_plain_cbv1_bytecode.bin";
-		//const char* ExampleShaderFilename = "manual_bytecode/gen_vs_01.bin";
-
-
-		const char* ExampleShaderFilename1 = "manual_bytecode/gen_ps_seed_2947667278772165694.bin";
-		const char* ExampleShaderFilename2 = "dxbc_re/ps_plain_tex_sample_bytecode.bin";
-
-		//if(0)
-		{
-			void* FileData = nullptr;
-			int32 FileSize = 0;
-			ReadDataFromFile(ExampleShaderFilename1, &FileData, &FileSize);
-		
-			ParseDXBCCode((byte*)FileData, FileSize);
-		}
-
-		if(0)
-		{
-			void* FileData = nullptr;
-			int32 FileSize = 0;
-			ReadDataFromFile(ExampleShaderFilename2, &FileData, &FileSize);
-		
-			ParseDXBCCode((byte*)FileData, FileSize);
-		}
+		const char* ExampleShaderFilename = "dxbc_re/ps_plain_sample_bytecode.bin";
 
 		{
-			//FuzzDXBCState DXBCFuzzer;
-			//GenerateShaderDXBC(&DXBCFuzzer);
+			FuzzDXBCState DXBCFuzzer;
+			GenerateShaderDXBC(&DXBCFuzzer);
 		
 			//ParseDXBCCode((byte*)FileData, FileSize);
 		}
 
 
-		//void* FileData = nullptr;
-		//int32 FileSize = 0;
-		//ReadDataFromFile(ExampleShaderFilename, &FileData, &FileSize);
-		//
-		//ParseDXBCCode((byte*)FileData, FileSize);
-		//
+		void* FileData = nullptr;
+		int32 FileSize = 0;
+		ReadDataFromFile(ExampleShaderFilename, &FileData, &FileSize);
+		
+		ParseDXBCCode((byte*)FileData, FileSize);
+
 		//ID3DBlob* Disasm = nullptr;
 		//HRESULT hr = D3DDisassemble(FileData, FileSize, 0, nullptr, &Disasm);
 		//ASSERT(SUCCEEDED(hr));
 		//
-		//WriteDataToFile("manual_bytecode/gen_vs_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
+		//WriteDataToFile("manual_bytecode/raw_reinsert_01_disasm.txt", Disasm->GetBufferPointer(), Disasm->GetBufferSize());
 
 
 		return 0;
@@ -342,7 +318,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.ForcePixelOutputAlphaToOne = 0;
-		ShaderConfig.DisableBlendingState = 1;
+		ShaderConfig.DisableBlendingState = 0;
 		ShaderConfig.CBVUploadRandomFloatData = 1;
 		ShaderConfig.ResourceDeletionChance = 0.7f;
 		ShaderConfig.HeapDeletionChance = 0;// 0.4f;
@@ -350,7 +326,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 		ShaderConfig.FuzzMethod = ShaderFuzzMethod::GeneratFullPipelineWithDXBC;
 
-		ShaderConfig.ShouldReadbackImage = true;
+		ShaderConfig.ShouldReadbackImage = false;
 		ShaderConfig.ReadbackImageNamePrepend = "image_case_dxbc_fuzz_";
 
 		{
@@ -389,7 +365,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			LARGE_INTEGER PerfStart;
 			QueryPerformanceCounter(&PerfStart);
 			
-			const int32 TestCases = 10 * 1000;
+			const int32 TestCases = 1;// 10 * 1000;
 
 			D3DDrawingFuzzingPersistentState PersistState;
 			PersistState.ResourceMgr.D3DDevice = Device;
@@ -403,10 +379,8 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 				Fuzzer.D3DPersist = &PersistState;
 				Fuzzer.Config = &ShaderConfig;
 
-				const uint64 InitSeed = i;
-
-				LOG("Doing round %d of fuzzing...", InitSeed);
-				Fuzzer.SetSeed(InitSeed);
+				LOG("Doing round %d of fuzzing...", i);
+				Fuzzer.SetSeed(239231183503600360LLU);
 				DoIterationsWithFuzzer(&Fuzzer, 1);
 			}
 			
@@ -453,7 +427,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 						InitialFuzzSeed += i;
 		
 						// In theory can cause contention maybe or slow things down? Idk, can remove this
-						LOG("Fuzing with seed %llu", InitialFuzzSeed);
+						LOG("Fuzing with seed %llu (TIdx:%d)", InitialFuzzSeed, TIdx);
 					
 						Fuzzer.SetSeed(InitialFuzzSeed);
 						DoIterationsWithFuzzer(&Fuzzer, 1);

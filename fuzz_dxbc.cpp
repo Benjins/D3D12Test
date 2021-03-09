@@ -1829,20 +1829,19 @@ void RandomiseShaderBytecodeParams(FuzzDXBCState* DXBCState, D3DOpcodeState* VSO
 
 	VSOpcodes->NumTextures = DXBCState->GetIntInRange(0, 3);
 	VSOpcodes->NumSamplers = DXBCState->GetIntInRange(0, 3);
-	VSOpcodes->CBVSizes.push_back(1);
-	VSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 3));
+	VSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 5));
 	for (int32 i = 0; i < VSOpcodes->CBVSizes.size(); i++)
 	{
-		VSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 5);
+		VSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 8);
 	}
 
 	PSOpcodes->NumTextures = DXBCState->GetIntInRange(0, 3);
 	PSOpcodes->NumSamplers = DXBCState->GetIntInRange(0, 3);
 
-	PSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 3));
+	PSOpcodes->CBVSizes.resize(DXBCState->GetIntInRange(0, 5));
 	for (int32 i = 0; i < PSOpcodes->CBVSizes.size(); i++)
 	{
-		PSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 5);
+		PSOpcodes->CBVSizes[i] = DXBCState->GetIntInRange(1, 8);
 	}
 }
 
@@ -2405,7 +2404,7 @@ void GenerateShaderDXBC(FuzzDXBCState* DXBCState)
 	VertShader.DataOpcodesToEmit = DXBCState->GetIntInRange(5, 9);
 
 	PixelShader.NumTempRegisters = DXBCState->GetIntInRange(4, 9);
-	PixelShader.DataOpcodesToEmit = DXBCState->GetIntInRange(10, 25);
+	PixelShader.DataOpcodesToEmit = DXBCState->GetIntInRange(10, 100);
 
 	GenerateBytecodeOpcodes(DXBCState, &VertShader);
 	GenerateBytecodeOpcodes(DXBCState, &PixelShader);
