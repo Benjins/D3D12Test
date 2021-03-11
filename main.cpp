@@ -36,12 +36,14 @@
 #pragma comment(lib, "D3D11.lib")
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib, "dxva2.lib")
 
 int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showCommand) {
 
 	ID3D12Debug1* D3D12DebugLayer = nullptr;
 	D3D12GetDebugInterface(IID_PPV_ARGS(&D3D12DebugLayer));
 	D3D12DebugLayer->EnableDebugLayer();
+
 	//D3D12DebugLayer->SetEnableGPUBasedValidation(true);
 	//D3D12DebugLayer->SetEnableSynchronizedCommandQueueValidation(true);
 
@@ -50,7 +52,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&DXGIFactory));
 	ASSERT(SUCCEEDED(hr));
 
-	int ChosenAdapterIndex = 0;
+	int ChosenAdapterIndex = 1;
 	IDXGIAdapter* ChosenAdapter = nullptr;
 
 	{
@@ -90,31 +92,95 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 	}
 
 
-	if (0)
+	//if (0)
 	{
-		ID3D11Device* Device = nullptr;
-		ID3D11DeviceContext* DeviceContext = nullptr;
-		UINT Flags = 0;
-		Flags |= D3D11_CREATE_DEVICE_DEBUG;
-		HRESULT hr = D3D11CreateDevice(ChosenAdapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, Flags, NULL, 0, D3D11_SDK_VERSION, &Device, NULL, &DeviceContext);
+		bool bIsSingleThreaded = false;
+		if (bIsSingleThreaded)
+		{
+			D3D11VideoFuzzingPersistentState Persist;
+			SetupVideoFuzzerPersistentState(&Persist, ChosenAdapter);
 
-		ASSERT(SUCCEEDED(hr));
 
-		ID3D11VideoDevice* VideoDevice = nullptr;
-		hr = Device->QueryInterface(IID_PPV_ARGS(&VideoDevice));
-		ASSERT(SUCCEEDED(hr));
+			//std::mutex DecoderMutex;
+			//Persist.DecodingMutex = &DecoderMutex;
 
-		ID3D11VideoContext* VideoContext = nullptr;
-		hr = DeviceContext->QueryInterface(IID_PPV_ARGS(&VideoContext));
-		ASSERT(SUCCEEDED(hr));
+			uint64 StartingTime = 1613401641;// time(NULL);
+			LOG("Starting time: %llu", StartingTime);
+			//Sleep(3 * 1000);
 
-		D3D11VideoFuzzingState Fuzzer;
-		Fuzzer.D3DDevice = Device;
-		Fuzzer.VideoDevice = VideoDevice;
-		Fuzzer.VideoContext = VideoContext;
+			//const int32 TIdx = 1;
 
-		SetSeedOnVideoFuzzer(&Fuzzer, 0);
-		DoIterationsWithVideoFuzzer(&Fuzzer, 1);
+			for (int32 Round = 0; Round < 1; Round++)
+			{
+				//uint64 TestCases[] = { 0 };
+				//uint64 TestCases[] = { 243314340147589533LLU };
+				//for (int32 i = 0; i < ARRAY_COUNTOF(TestCases); i++)
+				for (int32 i = 0; i < 1024*1024; i++)
+				{
+					D3D11VideoFuzzingState Fuzzer;
+					Fuzzer.Persistent = &Persist;
+
+
+					uint64 InitialFuzzSeed = 0;
+					//InitialFuzzSeed += StartingTime * 0x8FD3F77LLU;
+					//InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
+					InitialFuzzSeed += 243324495698931409LLU;
+					//InitialFuzzSeed += 243324495698932630LLU;
+					//InitialFuzzSeed += 243324495698932503LLU;
+					InitialFuzzSeed += i;
+
+					//InitialFuzzSeed = TestCases[i];
+					
+					LOG("Setting seed %llu on fuzzer", InitialFuzzSeed);
+					SetSeedOnVideoFuzzer(&Fuzzer, InitialFuzzSeed);
+					DoIterationsWithVideoFuzzer(&Fuzzer, 1);
+				}
+			}
+		}
+		else
+		{
+			const int32 ThreadCount = 8;
+			std::vector<std::thread> FuzzThreads;
+			uint64 StartingTime = time(NULL);
+			LOG("Starting time: %llu", StartingTime);
+			//Sleep(3*1000);
+
+			std::mutex DecodingMutex;
+
+			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
+			{
+				FuzzThreads.emplace_back([ChosenAdapter = ChosenAdapter, TIdx = ThreadIdx, StartingTime = StartingTime, DecodingMutexPtr = &DecodingMutex]() {
+
+					D3D11VideoFuzzingPersistentState Persist;
+					SetupVideoFuzzerPersistentState(&Persist, ChosenAdapter);
+
+					//Persist.DecodingMutex = DecodingMutexPtr;
+
+					for (int32 i = 0; i < 1024*1024; i++)
+					{
+						uint64 InitialFuzzSeed = 0;
+
+						// If we want to have different fuzzing each process run. Good once a fuzzer is established.
+						InitialFuzzSeed += StartingTime * 0x8FD3F77LLU;
+
+						InitialFuzzSeed += (TIdx * 1024LLU * 1024LLU);
+						InitialFuzzSeed += i;
+
+						D3D11VideoFuzzingState Fuzzer;
+						Fuzzer.Persistent = &Persist;
+
+						LOG("Setting seed %llu on fuzzer", InitialFuzzSeed);
+						SetSeedOnVideoFuzzer(&Fuzzer, InitialFuzzSeed);
+						DoIterationsWithVideoFuzzer(&Fuzzer, 1);
+					}
+				});
+			}
+
+			for (auto& Thread : FuzzThreads)
+			{
+				Thread.join();
+			}
+		}
 
 		return 0;
 	}
