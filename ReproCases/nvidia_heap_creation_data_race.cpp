@@ -12,6 +12,8 @@
 //
 // Tested on drivers 465.89, 461.92, 457.51, 419.67 with an RTX 2080, they all repro'd the issue
 //
+// Tested on an "NVIDIA GeForce GTX 1060" GPU with 419.71 drivers, and it did not appear to repro
+//
 
 
 #include <stdio.h>
