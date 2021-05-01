@@ -5,6 +5,7 @@
 #include <d3d12.h>
 
 #include <vector>
+#include <mutex>
 
 inline bool CompareD3D12ResourceDesc(const D3D12_RESOURCE_DESC& a, const D3D12_RESOURCE_DESC& b)
 {
@@ -469,7 +470,7 @@ struct ResourceLifecycleManager
 		}
 	}
 
-	void CheckIfFenceFinished(uint64 FrameFenceValue)
+	void CheckIfFenceFinished(uint64 FrameFenceValue, std::mutex* SRVDescriptorHeapMutex)
 	{
 		for (int32 i = 0; i < ResourcesPendingCmdListFinish.size(); i++)
 		{
@@ -513,7 +514,15 @@ struct ResourceLifecycleManager
 				}
 				else if (GPUObj.ObjType == OtherGPUObject::Type::DescriptorHeap)
 				{
-					((ID3D12DescriptorHeap*)GPUObj.Obj)->Release();
+					if (SRVDescriptorHeapMutex != nullptr)
+					{
+						std::lock_guard<std::mutex> Lock(*SRVDescriptorHeapMutex);
+						((ID3D12DescriptorHeap*)GPUObj.Obj)->Release();
+					}
+					else
+					{
+						((ID3D12DescriptorHeap*)GPUObj.Obj)->Release();
+					}
 				}
 				else
 				{

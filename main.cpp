@@ -313,16 +313,16 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 
 	//if (0)
 	{
-		bool bIsSingleThreaded = true;
+		bool bIsSingleThreaded = false;
 
 		ShaderFuzzConfig ShaderConfig;
 		ShaderConfig.EnsureBetterPixelCoverage = 1;
 		ShaderConfig.ForcePixelOutputAlphaToOne = 0;
 		ShaderConfig.DisableBlendingState = 0;
-		ShaderConfig.CBVUploadRandomFloatData = 1;
-		ShaderConfig.ResourceDeletionChance = 0.7f;
-		ShaderConfig.HeapDeletionChance = 0;// 0.4f;
-		ShaderConfig.PlacedResourceChance = 0;// 0.3f;
+		ShaderConfig.CBVUploadRandomFloatData = 0;
+		ShaderConfig.ResourceDeletionChance = 0.8f;
+		ShaderConfig.HeapDeletionChance = 0.8f;
+		ShaderConfig.PlacedResourceChance = 0.3f;
 
 		ShaderConfig.FuzzMethod = ShaderFuzzMethod::GeneratFullPipelineWithDXBC;
 
@@ -355,6 +355,7 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 			ChosenAdapter->GetDesc(&Desc);
 			ShaderConfig.AllowConservativeRasterization = (Desc.VendorId != 0x1414 || Desc.DeviceId != 0x8C);
 			ShaderConfig.LockMutexAroundExecCmdList = (Desc.VendorId == 0x1414 && Desc.DeviceId == 0x8C && !bIsSingleThreaded);
+			ShaderConfig.LockMutexAroundSRVDescriptorHeapCreateDestroy = (Desc.VendorId == 0x10DE && Desc.DeviceId == 0x1E82 && !bIsSingleThreaded);
 		}
 
 		if (bIsSingleThreaded)
@@ -393,20 +394,24 @@ int WinMain(HINSTANCE instance, HINSTANCE prevInstance, LPSTR cmdLine, int showC
 		}
 		else
 		{
-			const int32 ThreadCount = 16;
+			const int32 ThreadCount = 20;
 			std::vector<std::thread> FuzzThreads;
 
-			std::mutex DebugMutex;
+			std::mutex DebugMutexExecCmdList;
+			std::mutex DebugMutexSRVDescriptorHeap;
 
 			uint64 StartingTime = time(NULL);
 			LOG("Starting time: %llu", StartingTime);
 
 			for (int32 ThreadIdx = 0; ThreadIdx < ThreadCount; ThreadIdx++)
 			{
-				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, ConfigPtr = &ShaderConfig, StartingTime = StartingTime, MutexPtr = &DebugMutex]() {
+				FuzzThreads.emplace_back([Device = Device, TIdx = ThreadIdx, ConfigPtr = &ShaderConfig, StartingTime = StartingTime,
+						ExecCmdMutexPtr = &DebugMutexExecCmdList,
+						SRVHeapMutexPtr = &DebugMutexSRVDescriptorHeap]() {
 					D3DDrawingFuzzingPersistentState PersistState;
 					PersistState.ResourceMgr.D3DDevice = Device;
-					PersistState.ExecuteCommandListMutex = MutexPtr;
+					PersistState.ExecuteCommandListMutex = ExecCmdMutexPtr;
+					PersistState.SRVDescriptorHeapMutex = SRVHeapMutexPtr;
 					SetupFuzzPersistState(&PersistState, ConfigPtr, Device);
 
 					const int32 IterationsPerThread = 1024 * 1024;

@@ -24,6 +24,8 @@ struct D3DDrawingFuzzingPersistentState
 	// Must be shared across threads, so...yeah
 	std::mutex* ExecuteCommandListMutex = nullptr;
 
+	std::mutex* SRVDescriptorHeapMutex = nullptr;
+
 	// We have to start signaling with 1, since the initial value of the fence is 0
 	int32 ExecFenceToSignal = 1;
 };
@@ -53,7 +55,12 @@ struct ShaderFuzzConfig
 	byte CBVUploadRandomFloatData = 1;
 
 	// If there are data races in command list execution, this can avoid them while still allowing some threading
+	// Currently recommended for WARP
 	byte LockMutexAroundExecCmdList = 0;
+
+	// If there are data races in SRV Descriptor Heap management, this can avoid them while still allowing some threading
+	// Currently recommended for some Nvidia devices (e.g. RTX 2080)
+	byte LockMutexAroundSRVDescriptorHeapCreateDestroy = 0;
 
 	// If true, we copy the rendered images to a readback texture and spit them out to a file
 	byte ShouldReadbackImage = 0;

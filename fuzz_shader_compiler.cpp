@@ -1647,8 +1647,16 @@ void GenerateDrawingCommandsOnCommandList(ShaderFuzzingState* Fuzzer, ID3D12Grap
 		srvHeapDesc.NumDescriptors = 1;
 		srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 		srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		hr = Fuzzer->D3DDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&TextureSRVHeap));
-		// TODO: Leaking TextureSRVHeap
+		if (Fuzzer->Config->LockMutexAroundSRVDescriptorHeapCreateDestroy)
+		{
+			ASSERT(Fuzzer->D3DPersist->SRVDescriptorHeapMutex != nullptr);
+			std::lock_guard<std::mutex> Lock(*Fuzzer->D3DPersist->SRVDescriptorHeapMutex);
+			hr = Fuzzer->D3DDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&TextureSRVHeap));
+		}
+		else
+		{
+			hr = Fuzzer->D3DDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&TextureSRVHeap));
+		}
 
 		ASSERT(SUCCEEDED(hr));
 
@@ -1968,8 +1976,17 @@ void DoIterationsWithFuzzer(ShaderFuzzingState* Fuzzer, int32_t NumIterations)
 		uint64 ValueSignaled = Fuzzer->D3DPersist->ExecFenceToSignal;
 		Fuzzer->D3DPersist->CmdQueue->Signal(Fuzzer->D3DPersist->ExecFence, ValueSignaled);
 
-		Fuzzer->D3DPersist->CmdListMgr.CheckIfFenceFinished(Fuzzer->D3DPersist->ExecFence->GetCompletedValue());
-		Fuzzer->D3DPersist->ResourceMgr.CheckIfFenceFinished(Fuzzer->D3DPersist->ExecFence->GetCompletedValue());
+		uint64 ExecCompletedValue = Fuzzer->D3DPersist->ExecFence->GetCompletedValue();
+		Fuzzer->D3DPersist->CmdListMgr.CheckIfFenceFinished(ExecCompletedValue);
+		if (Fuzzer->Config->LockMutexAroundSRVDescriptorHeapCreateDestroy)
+		{
+			ASSERT(Fuzzer->D3DPersist->SRVDescriptorHeapMutex);
+			Fuzzer->D3DPersist->ResourceMgr.CheckIfFenceFinished(ExecCompletedValue, Fuzzer->D3DPersist->SRVDescriptorHeapMutex);
+		}
+		else
+		{
+			Fuzzer->D3DPersist->ResourceMgr.CheckIfFenceFinished(ExecCompletedValue, nullptr);
+		}
 
 		Fuzzer->D3DPersist->CmdListMgr.NowDoneWithCommandList(CommandList);
 		Fuzzer->D3DPersist->CmdListMgr.NowDoneWithCommandAllocator(CommandAllocator);
